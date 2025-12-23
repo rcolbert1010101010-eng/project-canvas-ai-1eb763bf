@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useConversations, useCreateConversation, useArchiveConversation, type Conversation } from '@/hooks/useConversations';
+import { ChatInterface } from '@/components/chat/ChatInterface';
 import type { Database } from '@/integrations/supabase/types';
 
 type AIMode = Database['public']['Enums']['ai_mode'];
@@ -39,7 +40,7 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
   const archiveConversation = useArchiveConversation();
   
   const [showArchived, setShowArchived] = useState(false);
-  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newPurpose, setNewPurpose] = useState('');
@@ -62,7 +63,7 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
   const handleCreateConversation = async () => {
     if (!newTitle.trim()) return;
     
-    await createConversation.mutateAsync({
+    const result = await createConversation.mutateAsync({
       project_id: projectId,
       title: newTitle,
       purpose: newPurpose || undefined,
@@ -73,6 +74,7 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
     setNewTitle('');
     setNewPurpose('');
     setNewMode('design');
+    setActiveConversationId(result.id);
   };
 
   const handleArchive = async (id: string) => {
@@ -87,10 +89,8 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
         variant="interactive"
         className={cn(
           "transition-all duration-200",
-          selectedConversation === conversation.id && "ring-2 ring-primary/50",
           isArchived && "opacity-70"
         )}
-        onClick={() => setSelectedConversation(conversation.id)}
       >
         <CardContent className="p-4">
           <div className="flex items-start gap-3">
@@ -136,12 +136,12 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
           <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border">
             {isArchived ? (
               <>
-                <Button variant="ghost" size="sm" className="flex-1">Load Messages</Button>
+                <Button variant="ghost" size="sm" className="flex-1" onClick={() => setActiveConversationId(conversation.id)}>Load Messages</Button>
                 <Button variant="ghost" size="sm" className="flex-1">Unarchive</Button>
               </>
             ) : (
               <>
-                <Button variant="default" size="sm" className="flex-1">Continue</Button>
+                <Button variant="default" size="sm" className="flex-1" onClick={() => setActiveConversationId(conversation.id)}>Continue</Button>
                 <Button 
                   variant="ghost" 
                   size="sm" 
@@ -160,6 +160,19 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
       </Card>
     );
   };
+
+  // Show chat interface if conversation is active
+  if (activeConversationId) {
+    return (
+      <div className="h-[calc(100vh-4rem)]">
+        <ChatInterface 
+          conversationId={activeConversationId} 
+          projectId={projectId} 
+          onClose={() => setActiveConversationId(null)}
+        />
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
