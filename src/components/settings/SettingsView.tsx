@@ -1,12 +1,42 @@
-import { User, Palette, Bot, Bell, Shield, Database, Download } from 'lucide-react';
+import { User, Palette, Bot, Bell, Shield, Database, Download, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { useUpdateProject, useDeleteProject } from '@/hooks/useProjects';
+import { useAppStore } from '@/stores/appStore';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-export function SettingsView() {
+interface SettingsViewProps {
+  projectId: string;
+  projectName: string;
+}
+
+export function SettingsView({ projectId, projectName }: SettingsViewProps) {
+  const updateProject = useUpdateProject();
+  const deleteProject = useDeleteProject();
+  const { setCurrentProjectId } = useAppStore();
+  const navigate = useNavigate();
+  
+  const [name, setName] = useState(projectName);
+  const [confirmDelete, setConfirmDelete] = useState('');
+
+  const handleUpdateName = async () => {
+    if (name.trim() && name !== projectName) {
+      await updateProject.mutateAsync({ id: projectId, name });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (confirmDelete === projectName) {
+      await deleteProject.mutateAsync(projectId);
+      setCurrentProjectId(null);
+    }
+  };
+
   return (
     <div className="p-6 max-w-4xl animate-in">
       <div className="mb-8">
@@ -27,15 +57,33 @@ export function SettingsView() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label>Project Name</Label>
-              <Input defaultValue="Canvas AI Project" />
+              <div className="flex gap-2">
+                <Input 
+                  value={name} 
+                  onChange={(e) => setName(e.target.value)}
+                />
+                <Button 
+                  variant="outline"
+                  onClick={handleUpdateName}
+                  disabled={!name.trim() || name === projectName || updateProject.isPending}
+                >
+                  {updateProject.isPending ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Project ID</Label>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-secondary/50 rounded-md text-sm font-mono text-muted-foreground">
-                  proj_canvas_ai_2024
+                <code className="flex-1 px-3 py-2 bg-secondary/50 rounded-md text-sm font-mono text-muted-foreground truncate">
+                  {projectId}
                 </code>
-                <Button variant="outline" size="sm">Copy</Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => navigator.clipboard.writeText(projectId)}
+                >
+                  Copy
+                </Button>
               </div>
             </div>
           </CardContent>
@@ -54,8 +102,8 @@ export function SettingsView() {
             <div className="space-y-2">
               <Label>Default Model</Label>
               <div className="flex items-center gap-2">
-                <Badge variant="default">GPT-4 Turbo</Badge>
-                <Badge variant="secondary">gpt-4-turbo-preview</Badge>
+                <Badge variant="default">Gemini 2.5 Flash</Badge>
+                <Badge variant="secondary">google/gemini-2.5-flash</Badge>
               </div>
             </div>
             <div className="flex items-center justify-between">
@@ -144,18 +192,34 @@ export function SettingsView() {
         <Card className="border-destructive/30">
           <CardHeader>
             <div className="flex items-center gap-2">
-              <Shield className="w-5 h-5 text-destructive" />
+              <Trash2 className="w-5 h-5 text-destructive" />
               <CardTitle className="text-destructive">Danger Zone</CardTitle>
             </div>
             <CardDescription>Irreversible actions</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-4 border border-destructive/30 rounded-lg">
+            <div className="p-4 border border-destructive/30 rounded-lg space-y-4">
               <div>
                 <p className="font-medium text-foreground">Delete Project</p>
                 <p className="text-sm text-muted-foreground">Permanently delete this project and all its data</p>
               </div>
-              <Button variant="destructive">Delete</Button>
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">
+                  Type <span className="font-mono text-foreground">{projectName}</span> to confirm
+                </Label>
+                <Input
+                  value={confirmDelete}
+                  onChange={(e) => setConfirmDelete(e.target.value)}
+                  placeholder={projectName}
+                />
+              </div>
+              <Button 
+                variant="destructive"
+                disabled={confirmDelete !== projectName || deleteProject.isPending}
+                onClick={handleDelete}
+              >
+                {deleteProject.isPending ? 'Deleting...' : 'Delete Project'}
+              </Button>
             </div>
           </CardContent>
         </Card>

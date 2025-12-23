@@ -1,19 +1,19 @@
 import { useState } from 'react';
 import { CheckCircle2, Circle, Clock, AlertCircle, ChevronRight, Filter, Plus } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { Task, TaskStatus, Priority } from '@/types';
+import { useTasks, useCreateTask, useUpdateTask, type Task } from '@/hooks/useTasks';
+import type { Database } from '@/integrations/supabase/types';
 
-const mockTasks: Task[] = [
-  { id: '1', project_id: '1', conversation_id: '1', title: 'Implement user authentication flow', description: 'Set up OAuth with Google and GitHub providers, implement session management', next_action: 'Research OAuth providers and compare options', status: 'in_progress', blocked_reason: null, priority: 'high', created_at: '2024-01-15', updated_at: '2024-01-15' },
-  { id: '2', project_id: '1', conversation_id: '1', title: 'Design database schema for users', description: 'Create ERD for user-related entities including profiles, preferences, and permissions', next_action: 'Review with team lead', status: 'blocked', blocked_reason: 'Waiting for requirements from product team', priority: 'high', created_at: '2024-01-14', updated_at: '2024-01-14' },
-  { id: '3', project_id: '1', conversation_id: null, title: 'Set up CI/CD pipeline', description: 'Configure GitHub Actions for automated testing and deployment', next_action: null, status: 'todo', blocked_reason: null, priority: 'medium', created_at: '2024-01-13', updated_at: '2024-01-13' },
-  { id: '4', project_id: '1', conversation_id: '2', title: 'Write API documentation', description: 'Document all REST endpoints using OpenAPI spec', next_action: null, status: 'todo', blocked_reason: null, priority: 'low', created_at: '2024-01-12', updated_at: '2024-01-12' },
-  { id: '5', project_id: '1', conversation_id: '1', title: 'Configure Tailwind CSS theme', description: 'Set up custom color palette and design tokens', next_action: null, status: 'done', blocked_reason: null, priority: 'medium', created_at: '2024-01-10', updated_at: '2024-01-11' },
-  { id: '6', project_id: '1', conversation_id: null, title: 'Set up error monitoring', description: 'Integrate Sentry for error tracking and alerting', next_action: null, status: 'done', blocked_reason: null, priority: 'high', created_at: '2024-01-09', updated_at: '2024-01-10' },
-];
+type TaskStatus = Database['public']['Enums']['task_status'];
+type Priority = Database['public']['Enums']['priority_level'];
 
 const statusConfig: Record<TaskStatus, { icon: React.ComponentType<{ className?: string }>; label: string; variant: 'todo' | 'in-progress' | 'blocked' | 'done' }> = {
   todo: { icon: Circle, label: 'To Do', variant: 'todo' },
@@ -24,18 +24,46 @@ const statusConfig: Record<TaskStatus, { icon: React.ComponentType<{ className?:
 
 const statusOrder: TaskStatus[] = ['in_progress', 'blocked', 'todo', 'done'];
 
-export function TasksView() {
+interface TasksViewProps {
+  projectId: string;
+}
+
+export function TasksView({ projectId }: TasksViewProps) {
+  const { data: tasks, isLoading } = useTasks(projectId);
+  const createTask = useCreateTask();
+  const updateTask = useUpdateTask();
+  
   const [filter, setFilter] = useState<TaskStatus | 'all'>('all');
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newPriority, setNewPriority] = useState<Priority>('medium');
 
   const groupedTasks = statusOrder.reduce((acc, status) => {
-    acc[status] = mockTasks.filter(t => t.status === status);
+    acc[status] = tasks?.filter(t => t.status === status) || [];
     return acc;
   }, {} as Record<TaskStatus, Task[]>);
 
-  const filteredTasks = filter === 'all' 
-    ? mockTasks 
-    : mockTasks.filter(t => t.status === filter);
+  const handleCreateTask = async () => {
+    if (!newTitle.trim()) return;
+    
+    await createTask.mutateAsync({
+      project_id: projectId,
+      title: newTitle,
+      description: newDescription || undefined,
+      priority: newPriority,
+    });
+    
+    setShowNewDialog(false);
+    setNewTitle('');
+    setNewDescription('');
+    setNewPriority('medium');
+  };
+
+  const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
+    await updateTask.mutateAsync({ id: taskId, status: newStatus });
+  };
 
   const TaskCard = ({ task }: { task: Task }) => {
     const StatusIcon = statusConfig[task.status].icon;
@@ -85,7 +113,7 @@ export function TasksView() {
               
               {isExpanded && (
                 <div className="mt-4 space-y-3 animate-in">
-                  <p className="text-sm text-muted-foreground">{task.description}</p>
+                  <p className="text-sm text-muted-foreground">{task.description || 'No description'}</p>
                   
                   {task.next_action && (
                     <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
@@ -102,9 +130,29 @@ export function TasksView() {
                   )}
                   
                   <div className="flex items-center gap-2 pt-2">
-                    <Button variant="outline" size="sm">Edit</Button>
                     {task.status !== 'done' && (
-                      <Button variant="success" size="sm">Mark Done</Button>
+                      <Button 
+                        variant="success" 
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStatusChange(task.id, 'done');
+                        }}
+                      >
+                        Mark Done
+                      </Button>
+                    )}
+                    {task.status === 'todo' && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStatusChange(task.id, 'in_progress');
+                        }}
+                      >
+                        Start
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -116,23 +164,77 @@ export function TasksView() {
     );
   };
 
+  if (isLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading tasks...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 animate-in">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-semibold text-foreground">Tasks</h2>
-          <p className="text-sm text-muted-foreground">{mockTasks.length} total tasks</p>
+          <p className="text-sm text-muted-foreground">{tasks?.length || 0} total tasks</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2">
-            <Filter className="w-4 h-4" />
-            Filter
-          </Button>
-          <Button variant="glow" size="sm" className="gap-2">
-            <Plus className="w-4 h-4" />
-            Add Task
-          </Button>
+          <Dialog open={showNewDialog} onOpenChange={setShowNewDialog}>
+            <DialogTrigger asChild>
+              <Button variant="glow" size="sm" className="gap-2">
+                <Plus className="w-4 h-4" />
+                Add Task
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New Task</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="title">Title</Label>
+                  <Input
+                    id="title"
+                    placeholder="Implement user authentication"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description (optional)</Label>
+                  <Textarea
+                    id="description"
+                    placeholder="Detailed task description..."
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="priority">Priority</Label>
+                  <Select value={newPriority} onValueChange={(v) => setNewPriority(v as Priority)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  variant="glow"
+                  className="w-full"
+                  onClick={handleCreateTask}
+                  disabled={!newTitle.trim() || createTask.isPending}
+                >
+                  {createTask.isPending ? 'Creating...' : 'Create Task'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -143,7 +245,7 @@ export function TasksView() {
           size="sm"
           onClick={() => setFilter('all')}
         >
-          All ({mockTasks.length})
+          All ({tasks?.length || 0})
         </Button>
         {statusOrder.map((status) => (
           <Button
@@ -158,30 +260,42 @@ export function TasksView() {
       </div>
 
       {/* Task Columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
-        {statusOrder.map((status) => (
-          <div key={status}>
-            <div className="flex items-center gap-2 mb-4">
-              <Badge variant={statusConfig[status].variant} className="text-xs">
-                {statusConfig[status].label}
-              </Badge>
-              <span className="text-sm text-muted-foreground">
-                {groupedTasks[status].length}
-              </span>
+      {tasks && tasks.length > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
+          {statusOrder.map((status) => (
+            <div key={status}>
+              <div className="flex items-center gap-2 mb-4">
+                <Badge variant={statusConfig[status].variant} className="text-xs">
+                  {statusConfig[status].label}
+                </Badge>
+                <span className="text-sm text-muted-foreground">
+                  {groupedTasks[status].length}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {groupedTasks[status].map((task) => (
+                  <TaskCard key={task.id} task={task} />
+                ))}
+                {groupedTasks[status].length === 0 && (
+                  <div className="p-4 text-center text-sm text-muted-foreground border border-dashed border-border rounded-lg">
+                    No tasks
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="space-y-3">
-              {groupedTasks[status].map((task) => (
-                <TaskCard key={task.id} task={task} />
-              ))}
-              {groupedTasks[status].length === 0 && (
-                <div className="p-4 text-center text-sm text-muted-foreground border border-dashed border-border rounded-lg">
-                  No tasks
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <CheckCircle2 className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <h4 className="text-lg font-medium text-foreground mb-2">No tasks yet</h4>
+          <p className="text-muted-foreground mb-4">Create your first task to start tracking work.</p>
+          <Button variant="glow" onClick={() => setShowNewDialog(true)} className="gap-2">
+            <Plus className="w-4 h-4" />
+            Add First Task
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
