@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { useConversations, useCreateConversation, useArchiveConversation, type Conversation } from '@/hooks/useConversations';
 import { ChatInterface } from '@/components/chat/ChatInterface';
+import { ConversationHealth } from './ConversationHealth';
 import type { Database } from '@/integrations/supabase/types';
 
 type AIMode = Database['public']['Enums']['ai_mode'];
@@ -121,10 +122,11 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
                 <Badge variant="secondary" className="text-xs">
                   {conversation.mode}
                 </Badge>
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <MessageSquare className="w-3 h-3" />
-                  {conversation.message_count || 0}
-                </span>
+                <ConversationHealth 
+                  messageCount={conversation.message_count || 0} 
+                  onArchive={() => handleArchive(conversation.id)}
+                  compact 
+                />
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Clock className="w-3 h-3" />
                   {formatDate(conversation.created_at)}
