@@ -9,10 +9,11 @@ import { useMessages, useCreateMessage, useUpdateConversationMode, type Message 
 import { useTasks } from '@/hooks/useTasks';
 import { useDecisions } from '@/hooks/useDecisions';
 import { useDocuments } from '@/hooks/useDocuments';
-import { useConversation } from '@/hooks/useConversations';
+import { useConversation, useArchiveConversation } from '@/hooks/useConversations';
 import { ChatMessage } from './ChatMessage';
 import { ModeSelector } from './ModeSelector';
 import { ContextPanel } from './ContextPanel';
+import { ConversationHealth } from '@/components/conversations/ConversationHealth';
 import type { Database } from '@/integrations/supabase/types';
 
 type AIMode = Database['public']['Enums']['ai_mode'];
@@ -34,6 +35,7 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
   
   const createMessage = useCreateMessage();
   const updateMode = useUpdateConversationMode();
+  const archiveConversation = useArchiveConversation();
   
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -206,6 +208,12 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
   };
 
   const contextCount = selectedContext.tasks.length + selectedContext.decisions.length + selectedContext.documents.length;
+  const messageCount = messages.length + (streamingContent ? 1 : 0);
+
+  const handleArchive = async () => {
+    await archiveConversation.mutateAsync({ id: conversationId });
+    onClose?.();
+  };
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -214,6 +222,11 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
         <div className="flex items-center gap-3">
           <ModeSelector currentMode={currentMode} onModeChange={handleModeChange} />
           <span className="text-sm text-muted-foreground">{conversation?.title}</span>
+          <ConversationHealth 
+            messageCount={messageCount} 
+            onArchive={handleArchive}
+            compact 
+          />
         </div>
         <div className="flex items-center gap-2">
           <Button
