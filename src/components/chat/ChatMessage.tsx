@@ -1,18 +1,21 @@
 import { User, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ExtractionMenu } from './ExtractionMenu';
 import type { Message } from '@/hooks/useMessages';
 
 interface ChatMessageProps {
   message: Message;
   isStreaming?: boolean;
+  projectId?: string;
 }
 
-export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
+export function ChatMessage({ message, isStreaming, projectId }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const showExtraction = !isStreaming && projectId && message.id !== 'streaming';
   
   return (
     <div className={cn(
-      "flex gap-3 animate-in fade-in slide-in-from-bottom-2",
+      "group flex gap-3 animate-in fade-in slide-in-from-bottom-2",
       isUser && "flex-row-reverse"
     )}>
       <div className={cn(
@@ -23,7 +26,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
       </div>
       
       <div className={cn(
-        "flex-1 max-w-[80%] rounded-lg px-4 py-3",
+        "flex-1 max-w-[80%] rounded-lg px-4 py-3 relative",
         isUser ? "bg-primary text-primary-foreground" : "bg-muted"
       )}>
         <div className={cn(
@@ -33,10 +36,23 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
           {message.content}
         </div>
         <div className={cn(
-          "text-xs mt-2 opacity-60",
+          "flex items-center justify-between mt-2",
           isUser ? "text-primary-foreground" : "text-muted-foreground"
         )}>
-          {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          <span className="text-xs opacity-60">
+            {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {showExtraction && (
+            <ExtractionMenu 
+              content={message.content} 
+              projectId={projectId}
+              conversationId={message.conversation_id}
+              className={cn(
+                "opacity-0 group-hover:opacity-100 transition-opacity",
+                isUser ? "text-primary-foreground hover:bg-primary-foreground/20" : ""
+              )}
+            />
+          )}
         </div>
       </div>
     </div>

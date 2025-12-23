@@ -258,7 +258,7 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
             ) : (
               <div className="space-y-4">
                 {messages.map((message) => (
-                  <ChatMessage key={message.id} message={message} />
+                  <ChatMessage key={message.id} message={message} projectId={projectId} />
                 ))}
                 {streamingContent && (
                   <ChatMessage 
