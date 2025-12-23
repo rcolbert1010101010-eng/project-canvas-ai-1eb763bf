@@ -1,18 +1,17 @@
 import { useState } from 'react';
-import { MessageSquare, Archive, Clock, ChevronDown, Sparkles, Bug, Map, Code, Eye } from 'lucide-react';
+import { MessageSquare, Archive, Clock, ChevronDown, Sparkles, Bug, Map, Code, Eye, Plus } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { Conversation, AIMode } from '@/types';
+import { useConversations, useCreateConversation, useArchiveConversation, type Conversation } from '@/hooks/useConversations';
+import type { Database } from '@/integrations/supabase/types';
 
-const mockConversations: Conversation[] = [
-  { id: '1', project_id: '1', title: 'Architecture Planning Session', purpose: 'Define system architecture and core patterns', summary: null, is_archived: false, mode: 'design', created_at: '2024-01-15T10:30:00', message_count: 24 },
-  { id: '2', project_id: '1', title: 'Debugging Auth Flow', purpose: 'Fix OAuth callback issues', summary: null, is_archived: false, mode: 'debug', created_at: '2024-01-14T14:20:00', message_count: 18 },
-  { id: '3', project_id: '1', title: 'Sprint Planning Q1', purpose: 'Plan features for Q1 2024', summary: null, is_archived: false, mode: 'planning', created_at: '2024-01-13T09:00:00', message_count: 32 },
-  { id: '4', project_id: '1', title: 'API Design Review', purpose: 'Review REST endpoints design', summary: 'Reviewed all API endpoints. Decided on REST over GraphQL. Need to add rate limiting.', is_archived: true, mode: 'review', created_at: '2024-01-10T11:00:00', message_count: 45 },
-  { id: '5', project_id: '1', title: 'Database Migration Strategy', purpose: 'Plan data migration from legacy system', summary: 'Established 3-phase migration approach with rollback capabilities.', is_archived: true, mode: 'implementation', created_at: '2024-01-08T15:30:00', message_count: 28 },
-];
+type AIMode = Database['public']['Enums']['ai_mode'];
 
 const modeIcons: Record<AIMode, React.ComponentType<{ className?: string }>> = {
   design: Sparkles,
@@ -30,12 +29,24 @@ const modeColors: Record<AIMode, string> = {
   review: 'bg-success/10 text-success',
 };
 
-export function ConversationsList() {
+interface ConversationsListProps {
+  projectId: string;
+}
+
+export function ConversationsList({ projectId }: ConversationsListProps) {
+  const { data: conversations, isLoading } = useConversations(projectId);
+  const createConversation = useCreateConversation();
+  const archiveConversation = useArchiveConversation();
+  
   const [showArchived, setShowArchived] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newPurpose, setNewPurpose] = useState('');
+  const [newMode, setNewMode] = useState<AIMode>('design');
   
-  const activeConversations = mockConversations.filter(c => !c.is_archived);
-  const archivedConversations = mockConversations.filter(c => c.is_archived);
+  const activeConversations = conversations?.filter(c => !c.is_archived) || [];
+  const archivedConversations = conversations?.filter(c => c.is_archived) || [];
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -46,6 +57,26 @@ export function ConversationsList() {
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays} days ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const handleCreateConversation = async () => {
+    if (!newTitle.trim()) return;
+    
+    await createConversation.mutateAsync({
+      project_id: projectId,
+      title: newTitle,
+      purpose: newPurpose || undefined,
+      mode: newMode,
+    });
+    
+    setShowNewDialog(false);
+    setNewTitle('');
+    setNewPurpose('');
+    setNewMode('design');
+  };
+
+  const handleArchive = async (id: string) => {
+    await archiveConversation.mutateAsync({ id });
   };
 
   const ConversationCard = ({ conversation, isArchived = false }: { conversation: Conversation; isArchived?: boolean }) => {
@@ -92,7 +123,7 @@ export function ConversationsList() {
                 </Badge>
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <MessageSquare className="w-3 h-3" />
-                  {conversation.message_count}
+                  {conversation.message_count || 0}
                 </span>
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Clock className="w-3 h-3" />
@@ -111,7 +142,17 @@ export function ConversationsList() {
             ) : (
               <>
                 <Button variant="default" size="sm" className="flex-1">Continue</Button>
-                <Button variant="ghost" size="sm" className="flex-1">Archive</Button>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="flex-1"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleArchive(conversation.id);
+                  }}
+                >
+                  Archive
+                </Button>
               </>
             )}
           </div>
@@ -120,44 +161,123 @@ export function ConversationsList() {
     );
   };
 
+  if (isLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading conversations...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 animate-in">
-      {/* Active Conversations */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
           <h3 className="text-lg font-semibold text-foreground">Active Conversations</h3>
-          <Badge variant="info">{activeConversations.length} active</Badge>
+          <p className="text-sm text-muted-foreground">{activeConversations.length} active, {archivedConversations.length} archived</p>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <Dialog open={showNewDialog} onOpenChange={setShowNewDialog}>
+          <DialogTrigger asChild>
+            <Button variant="glow" className="gap-2">
+              <Plus className="w-4 h-4" />
+              New Conversation
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Start New Conversation</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="title">Title</Label>
+                <Input
+                  id="title"
+                  placeholder="Architecture Planning Session"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="purpose">Purpose (optional)</Label>
+                <Input
+                  id="purpose"
+                  placeholder="Define system architecture"
+                  value={newPurpose}
+                  onChange={(e) => setNewPurpose(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mode">AI Mode</Label>
+                <Select value={newMode} onValueChange={(v) => setNewMode(v as AIMode)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="design">Design</SelectItem>
+                    <SelectItem value="debug">Debug</SelectItem>
+                    <SelectItem value="planning">Planning</SelectItem>
+                    <SelectItem value="implementation">Implementation</SelectItem>
+                    <SelectItem value="review">Review</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                variant="glow"
+                className="w-full"
+                onClick={handleCreateConversation}
+                disabled={!newTitle.trim() || createConversation.isPending}
+              >
+                {createConversation.isPending ? 'Creating...' : 'Start Conversation'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      
+      {/* Active Conversations */}
+      {activeConversations.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
           {activeConversations.map((conv) => (
             <ConversationCard key={conv.id} conversation={conv} />
           ))}
         </div>
-      </div>
+      ) : (
+        <div className="text-center py-12 mb-8">
+          <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <h4 className="text-lg font-medium text-foreground mb-2">No active conversations</h4>
+          <p className="text-muted-foreground mb-4">Start a new conversation to begin working with AI.</p>
+          <Button variant="glow" onClick={() => setShowNewDialog(true)} className="gap-2">
+            <Plus className="w-4 h-4" />
+            Start First Conversation
+          </Button>
+        </div>
+      )}
 
       {/* Archived Conversations */}
-      <div>
-        <button 
-          onClick={() => setShowArchived(!showArchived)}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors mb-4"
-        >
-          <ChevronDown className={cn(
-            "w-4 h-4 transition-transform",
-            showArchived && "rotate-180"
-          )} />
-          <span className="text-sm font-medium">Archived Conversations</span>
-          <Badge variant="secondary">{archivedConversations.length}</Badge>
-        </button>
-        
-        {showArchived && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in">
-            {archivedConversations.map((conv) => (
-              <ConversationCard key={conv.id} conversation={conv} isArchived />
-            ))}
-          </div>
-        )}
-      </div>
+      {archivedConversations.length > 0 && (
+        <div>
+          <button 
+            onClick={() => setShowArchived(!showArchived)}
+            className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors mb-4"
+          >
+            <ChevronDown className={cn(
+              "w-4 h-4 transition-transform",
+              showArchived && "rotate-180"
+            )} />
+            <span className="text-sm font-medium">Archived Conversations</span>
+            <Badge variant="secondary">{archivedConversations.length}</Badge>
+          </button>
+          
+          {showArchived && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in">
+              {archivedConversations.map((conv) => (
+                <ConversationCard key={conv.id} conversation={conv} isArchived />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

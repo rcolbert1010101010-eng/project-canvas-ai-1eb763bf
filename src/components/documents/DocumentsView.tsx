@@ -4,68 +4,29 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import type { Document } from '@/types';
+import { useDocuments, useCreateDocument, useUpdateDocument, type Document } from '@/hooks/useDocuments';
 
-const mockDocuments: Document[] = [
-  { 
-    id: '1', 
-    project_id: '1', 
-    title: 'Architecture Overview', 
-    content: '# Architecture Overview\n\nThis document describes the high-level architecture of the system...', 
-    is_pinned: true, 
-    version: 3, 
-    created_at: '2024-01-10', 
-    updated_at: '2024-01-15' 
-  },
-  { 
-    id: '2', 
-    project_id: '1', 
-    title: 'API Specification', 
-    content: '# API Specification\n\n## Endpoints\n\n### Users\n- GET /users\n- POST /users...', 
-    is_pinned: true, 
-    version: 7, 
-    created_at: '2024-01-08', 
-    updated_at: '2024-01-14' 
-  },
-  { 
-    id: '3', 
-    project_id: '1', 
-    title: 'Database Schema', 
-    content: '# Database Schema\n\n## Tables\n\n### users\n| Column | Type | Description |...', 
-    is_pinned: false, 
-    version: 2, 
-    created_at: '2024-01-12', 
-    updated_at: '2024-01-13' 
-  },
-  { 
-    id: '4', 
-    project_id: '1', 
-    title: 'Deployment Guide', 
-    content: '# Deployment Guide\n\n## Prerequisites\n\n- Node.js 18+\n- Docker...', 
-    is_pinned: false, 
-    version: 1, 
-    created_at: '2024-01-11', 
-    updated_at: '2024-01-11' 
-  },
-  { 
-    id: '5', 
-    project_id: '1', 
-    title: 'Testing Strategy', 
-    content: '# Testing Strategy\n\n## Unit Tests\n\nWe use Jest for unit testing...', 
-    is_pinned: false, 
-    version: 4, 
-    created_at: '2024-01-09', 
-    updated_at: '2024-01-12' 
-  },
-];
+interface DocumentsViewProps {
+  projectId: string;
+}
 
-export function DocumentsView() {
+export function DocumentsView({ projectId }: DocumentsViewProps) {
+  const { data: documents, isLoading } = useDocuments(projectId);
+  const createDocument = useCreateDocument();
+  const updateDocument = useUpdateDocument();
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newContent, setNewContent] = useState('');
 
-  const pinnedDocs = mockDocuments.filter(d => d.is_pinned);
-  const otherDocs = mockDocuments.filter(d => !d.is_pinned);
+  const pinnedDocs = documents?.filter(d => d.is_pinned) || [];
+  const otherDocs = documents?.filter(d => !d.is_pinned) || [];
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -74,7 +35,29 @@ export function DocumentsView() {
 
   const getPreview = (content: string) => {
     const lines = content.split('\n').filter(l => !l.startsWith('#') && l.trim());
-    return lines.slice(0, 2).join(' ').substring(0, 150) + '...';
+    return lines.slice(0, 2).join(' ').substring(0, 150) + (content.length > 150 ? '...' : '');
+  };
+
+  const handleCreateDocument = async () => {
+    if (!newTitle.trim()) return;
+    
+    const doc = await createDocument.mutateAsync({
+      project_id: projectId,
+      title: newTitle,
+      content: newContent,
+    });
+    
+    setShowNewDialog(false);
+    setNewTitle('');
+    setNewContent('');
+    setSelectedDoc(doc);
+  };
+
+  const handleTogglePin = async (doc: Document) => {
+    await updateDocument.mutateAsync({ id: doc.id, is_pinned: !doc.is_pinned });
+    if (selectedDoc?.id === doc.id) {
+      setSelectedDoc({ ...doc, is_pinned: !doc.is_pinned });
+    }
   };
 
   const DocumentCard = ({ doc }: { doc: Document }) => (
@@ -125,6 +108,14 @@ export function DocumentsView() {
     </Card>
   );
 
+  if (isLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading documents...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 animate-in">
       <div className="flex gap-6">
@@ -136,10 +127,48 @@ export function DocumentsView() {
               <h2 className="text-xl font-semibold text-foreground">Documents</h2>
               <p className="text-sm text-muted-foreground">Source of truth for your project</p>
             </div>
-            <Button variant="glow" size="sm" className="gap-2">
-              <Plus className="w-4 h-4" />
-              New Document
-            </Button>
+            <Dialog open={showNewDialog} onOpenChange={setShowNewDialog}>
+              <DialogTrigger asChild>
+                <Button variant="glow" size="sm" className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  New Document
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create New Document</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 pt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="title">Title</Label>
+                    <Input
+                      id="title"
+                      placeholder="Architecture Overview"
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="content">Content (Markdown)</Label>
+                    <Textarea
+                      id="content"
+                      placeholder="# Document Title&#10;&#10;Write your content here..."
+                      value={newContent}
+                      onChange={(e) => setNewContent(e.target.value)}
+                      className="min-h-[200px] font-mono text-sm"
+                    />
+                  </div>
+                  <Button
+                    variant="glow"
+                    className="w-full"
+                    onClick={handleCreateDocument}
+                    disabled={!newTitle.trim() || createDocument.isPending}
+                  >
+                    {createDocument.isPending ? 'Creating...' : 'Create Document'}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
 
           {/* Search */}
@@ -153,35 +182,51 @@ export function DocumentsView() {
             />
           </div>
 
-          {/* Pinned Documents */}
-          {pinnedDocs.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-2 mb-4">
-                <Pin className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-medium text-foreground">Pinned</h3>
-                <Badge variant="default">{pinnedDocs.length}</Badge>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {pinnedDocs.map((doc) => (
-                  <DocumentCard key={doc.id} doc={doc} />
-                ))}
-              </div>
+          {documents && documents.length > 0 ? (
+            <>
+              {/* Pinned Documents */}
+              {pinnedDocs.length > 0 && (
+                <div className="mb-8">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Pin className="w-4 h-4 text-primary" />
+                    <h3 className="text-sm font-medium text-foreground">Pinned</h3>
+                    <Badge variant="default">{pinnedDocs.length}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {pinnedDocs.map((doc) => (
+                      <DocumentCard key={doc.id} doc={doc} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Other Documents */}
+              {otherDocs.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <FolderOpen className="w-4 h-4 text-muted-foreground" />
+                    <h3 className="text-sm font-medium text-foreground">All Documents</h3>
+                    <Badge variant="secondary">{otherDocs.length}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {otherDocs.map((doc) => (
+                      <DocumentCard key={doc.id} doc={doc} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h4 className="text-lg font-medium text-foreground mb-2">No documents yet</h4>
+              <p className="text-muted-foreground mb-4">Create your first document to store project knowledge.</p>
+              <Button variant="glow" onClick={() => setShowNewDialog(true)} className="gap-2">
+                <Plus className="w-4 h-4" />
+                Create First Document
+              </Button>
             </div>
           )}
-
-          {/* Other Documents */}
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <FolderOpen className="w-4 h-4 text-muted-foreground" />
-              <h3 className="text-sm font-medium text-foreground">All Documents</h3>
-              <Badge variant="secondary">{otherDocs.length}</Badge>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {otherDocs.map((doc) => (
-                <DocumentCard key={doc.id} doc={doc} />
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Document Preview */}
@@ -220,7 +265,7 @@ export function DocumentsView() {
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Preview</p>
                   <div className="prose prose-sm prose-invert max-w-none">
                     <pre className="text-xs bg-secondary/50 p-3 rounded-lg overflow-auto max-h-64 whitespace-pre-wrap">
-                      {selectedDoc.content}
+                      {selectedDoc.content || 'No content'}
                     </pre>
                   </div>
                 </div>
@@ -230,6 +275,7 @@ export function DocumentsView() {
                   <Button 
                     variant="outline" 
                     size="sm"
+                    onClick={() => handleTogglePin(selectedDoc)}
                   >
                     {selectedDoc.is_pinned ? 'Unpin' : 'Pin'}
                   </Button>

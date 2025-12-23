@@ -1,73 +1,19 @@
 import { useState } from 'react';
-import { Lightbulb, CheckCircle, XCircle, Clock, Link2, ArrowRight, Plus, Filter } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Lightbulb, CheckCircle, XCircle, Clock, Link2, ArrowRight, Plus } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { Decision, DecisionStatus, Impact } from '@/types';
+import { useDecisions, useCreateDecision, useUpdateDecision, type Decision } from '@/hooks/useDecisions';
+import type { Database } from '@/integrations/supabase/types';
 
-const mockDecisions: Decision[] = [
-  { 
-    id: '1', 
-    project_id: '1', 
-    conversation_id: '1', 
-    title: 'Use PostgreSQL for primary database', 
-    decision: 'PostgreSQL will be our primary database for all structured data', 
-    rationale: 'PostgreSQL offers excellent support for complex queries, transactions, and JSON data. It integrates well with our ORM choice and provides robust full-text search capabilities.', 
-    status: 'accepted', 
-    impact: 'high', 
-    supersedes_decision_id: null, 
-    created_at: '2024-01-15' 
-  },
-  { 
-    id: '2', 
-    project_id: '1', 
-    conversation_id: '1', 
-    title: 'Adopt TypeScript for all new code', 
-    decision: 'TypeScript is mandatory for all new frontend and backend code', 
-    rationale: 'Type safety reduces runtime errors, improves IDE support, and makes refactoring safer. The team has sufficient TypeScript experience.', 
-    status: 'accepted', 
-    impact: 'high', 
-    supersedes_decision_id: null, 
-    created_at: '2024-01-14' 
-  },
-  { 
-    id: '3', 
-    project_id: '1', 
-    conversation_id: '2', 
-    title: 'Use REST over GraphQL for API', 
-    decision: 'REST API architecture for all public and internal endpoints', 
-    rationale: 'GraphQL adds complexity without significant benefits for our use case. REST is well-understood by the team and has better caching support.', 
-    status: 'accepted', 
-    impact: 'medium', 
-    supersedes_decision_id: null, 
-    created_at: '2024-01-13' 
-  },
-  { 
-    id: '4', 
-    project_id: '1', 
-    conversation_id: '3', 
-    title: 'Implement feature flags with LaunchDarkly', 
-    decision: 'Use LaunchDarkly for feature flag management', 
-    rationale: 'Enables gradual rollouts, A/B testing, and quick feature toggles without deployment', 
-    status: 'proposed', 
-    impact: 'medium', 
-    supersedes_decision_id: null, 
-    created_at: '2024-01-12' 
-  },
-  { 
-    id: '5', 
-    project_id: '1', 
-    conversation_id: null, 
-    title: 'Use MongoDB for analytics data', 
-    decision: 'MongoDB as secondary database for analytics and event data', 
-    rationale: 'Initially considered for flexible schema, but decided PostgreSQL with JSONB is sufficient.', 
-    status: 'deprecated', 
-    impact: 'medium', 
-    supersedes_decision_id: '1', 
-    created_at: '2024-01-10' 
-  },
-];
+type DecisionStatus = Database['public']['Enums']['decision_status'];
+type Impact = Database['public']['Enums']['impact_level'];
 
 const statusConfig: Record<DecisionStatus, { icon: React.ComponentType<{ className?: string }>; label: string; color: string }> = {
   proposed: { icon: Clock, label: 'Proposed', color: 'text-warning' },
@@ -75,19 +21,54 @@ const statusConfig: Record<DecisionStatus, { icon: React.ComponentType<{ classNa
   deprecated: { icon: XCircle, label: 'Deprecated', color: 'text-muted-foreground' },
 };
 
-export function DecisionsView() {
+interface DecisionsViewProps {
+  projectId: string;
+}
+
+export function DecisionsView({ projectId }: DecisionsViewProps) {
+  const { data: decisions, isLoading } = useDecisions(projectId);
+  const createDecision = useCreateDecision();
+  const updateDecision = useUpdateDecision();
+  
   const [filter, setFilter] = useState<DecisionStatus | 'all'>('all');
   const [expandedDecision, setExpandedDecision] = useState<string | null>(null);
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newDecision, setNewDecision] = useState('');
+  const [newRationale, setNewRationale] = useState('');
+  const [newImpact, setNewImpact] = useState<Impact>('medium');
 
   const filteredDecisions = filter === 'all'
-    ? mockDecisions
-    : mockDecisions.filter(d => d.status === filter);
+    ? decisions
+    : decisions?.filter(d => d.status === filter);
 
   const counts = {
-    all: mockDecisions.length,
-    proposed: mockDecisions.filter(d => d.status === 'proposed').length,
-    accepted: mockDecisions.filter(d => d.status === 'accepted').length,
-    deprecated: mockDecisions.filter(d => d.status === 'deprecated').length,
+    all: decisions?.length || 0,
+    proposed: decisions?.filter(d => d.status === 'proposed').length || 0,
+    accepted: decisions?.filter(d => d.status === 'accepted').length || 0,
+    deprecated: decisions?.filter(d => d.status === 'deprecated').length || 0,
+  };
+
+  const handleCreateDecision = async () => {
+    if (!newTitle.trim() || !newDecision.trim()) return;
+    
+    await createDecision.mutateAsync({
+      project_id: projectId,
+      title: newTitle,
+      decision: newDecision,
+      rationale: newRationale || undefined,
+      impact: newImpact,
+    });
+    
+    setShowNewDialog(false);
+    setNewTitle('');
+    setNewDecision('');
+    setNewRationale('');
+    setNewImpact('medium');
+  };
+
+  const handleStatusChange = async (id: string, status: DecisionStatus) => {
+    await updateDecision.mutateAsync({ id, status });
   };
 
   const DecisionCard = ({ decision }: { decision: Decision }) => {
@@ -139,34 +120,46 @@ export function DecisionsView() {
                 <div className="mt-4 space-y-4 animate-in">
                   <div>
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Rationale</span>
-                    <p className="text-sm text-foreground mt-1">{decision.rationale}</p>
+                    <p className="text-sm text-foreground mt-1">{decision.rationale || 'No rationale provided'}</p>
                   </div>
-                  
-                  {decision.supersedes_decision_id && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Link2 className="w-4 h-4" />
-                      <span>Superseded by another decision</span>
-                    </div>
-                  )}
-                  
-                  {decision.conversation_id && (
-                    <div className="flex items-center gap-2 text-sm text-primary cursor-pointer hover:underline">
-                      <ArrowRight className="w-4 h-4" />
-                      <span>View source conversation</span>
-                    </div>
-                  )}
                   
                   <div className="flex items-center gap-2 pt-2 border-t border-border">
                     {decision.status === 'proposed' && (
                       <>
-                        <Button variant="success" size="sm">Accept</Button>
-                        <Button variant="outline" size="sm">Reject</Button>
+                        <Button 
+                          variant="success" 
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStatusChange(decision.id, 'accepted');
+                          }}
+                        >
+                          Accept
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStatusChange(decision.id, 'deprecated');
+                          }}
+                        >
+                          Reject
+                        </Button>
                       </>
                     )}
                     {decision.status === 'accepted' && (
-                      <Button variant="outline" size="sm">Mark Deprecated</Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStatusChange(decision.id, 'deprecated');
+                        }}
+                      >
+                        Mark Deprecated
+                      </Button>
                     )}
-                    <Button variant="ghost" size="sm">Edit</Button>
                   </div>
                 </div>
               )}
@@ -177,6 +170,14 @@ export function DecisionsView() {
     );
   };
 
+  if (isLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading decisions...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 animate-in">
       {/* Header */}
@@ -186,14 +187,69 @@ export function DecisionsView() {
           <p className="text-sm text-muted-foreground">Architectural decisions and their rationale</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2">
-            <Filter className="w-4 h-4" />
-            Filter
-          </Button>
-          <Button variant="glow" size="sm" className="gap-2">
-            <Plus className="w-4 h-4" />
-            Record Decision
-          </Button>
+          <Dialog open={showNewDialog} onOpenChange={setShowNewDialog}>
+            <DialogTrigger asChild>
+              <Button variant="glow" size="sm" className="gap-2">
+                <Plus className="w-4 h-4" />
+                Record Decision
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Record New Decision</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="title">Title</Label>
+                  <Input
+                    id="title"
+                    placeholder="Use PostgreSQL for primary database"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="decision">Decision</Label>
+                  <Textarea
+                    id="decision"
+                    placeholder="What was decided..."
+                    value={newDecision}
+                    onChange={(e) => setNewDecision(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rationale">Rationale (optional)</Label>
+                  <Textarea
+                    id="rationale"
+                    placeholder="Why this decision was made..."
+                    value={newRationale}
+                    onChange={(e) => setNewRationale(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="impact">Impact</Label>
+                  <Select value={newImpact} onValueChange={(v) => setNewImpact(v as Impact)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  variant="glow"
+                  className="w-full"
+                  onClick={handleCreateDecision}
+                  disabled={!newTitle.trim() || !newDecision.trim() || createDecision.isPending}
+                >
+                  {createDecision.isPending ? 'Recording...' : 'Record Decision'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -206,7 +262,7 @@ export function DecisionsView() {
             </div>
             <div>
               <p className="text-2xl font-bold">{counts.accepted}</p>
-              <p className="text-sm text-muted-foreground">Accepted</p>
+              <p className="text-xs text-muted-foreground">Accepted</p>
             </div>
           </div>
         </Card>
@@ -217,7 +273,7 @@ export function DecisionsView() {
             </div>
             <div>
               <p className="text-2xl font-bold">{counts.proposed}</p>
-              <p className="text-sm text-muted-foreground">Proposed</p>
+              <p className="text-xs text-muted-foreground">Proposed</p>
             </div>
           </div>
         </Card>
@@ -228,7 +284,7 @@ export function DecisionsView() {
             </div>
             <div>
               <p className="text-2xl font-bold">{counts.deprecated}</p>
-              <p className="text-sm text-muted-foreground">Deprecated</p>
+              <p className="text-xs text-muted-foreground">Deprecated</p>
             </div>
           </div>
         </Card>
@@ -249,11 +305,23 @@ export function DecisionsView() {
       </div>
 
       {/* Decisions List */}
-      <div className="space-y-4">
-        {filteredDecisions.map((decision) => (
-          <DecisionCard key={decision.id} decision={decision} />
-        ))}
-      </div>
+      {filteredDecisions && filteredDecisions.length > 0 ? (
+        <div className="space-y-4">
+          {filteredDecisions.map((decision) => (
+            <DecisionCard key={decision.id} decision={decision} />
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <Lightbulb className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <h4 className="text-lg font-medium text-foreground mb-2">No decisions recorded</h4>
+          <p className="text-muted-foreground mb-4">Record your first architectural decision.</p>
+          <Button variant="glow" onClick={() => setShowNewDialog(true)} className="gap-2">
+            <Plus className="w-4 h-4" />
+            Record First Decision
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

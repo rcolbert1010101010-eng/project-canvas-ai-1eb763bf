@@ -9,34 +9,50 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  Activity
+  Activity,
+  LogOut,
+  FolderOpen
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/hooks/useAuth';
+import { useConversations } from '@/hooks/useConversations';
+import { useTasks } from '@/hooks/useTasks';
+import { useDecisions } from '@/hooks/useDecisions';
 
 type NavItem = {
   id: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  badge?: number;
+  getBadge?: () => number;
 };
-
-const navItems: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'conversations', label: 'Conversations', icon: MessageSquare, badge: 3 },
-  { id: 'tasks', label: 'Tasks', icon: CheckSquare, badge: 12 },
-  { id: 'decisions', label: 'Decisions', icon: Lightbulb, badge: 5 },
-  { id: 'documents', label: 'Documents', icon: FileText },
-  { id: 'activity', label: 'Activity', icon: Activity },
-];
 
 interface SidebarProps {
   activeView: string;
   onViewChange: (view: string) => void;
+  projectId: string | null;
 }
 
-export function Sidebar({ activeView, onViewChange }: SidebarProps) {
+export function Sidebar({ activeView, onViewChange, projectId }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const { signOut } = useAuth();
+  
+  const { data: conversations } = useConversations(projectId);
+  const { data: tasks } = useTasks(projectId);
+  const { data: decisions } = useDecisions(projectId);
+
+  const activeConversations = conversations?.filter(c => !c.is_archived).length || 0;
+  const openTasks = tasks?.filter(t => t.status !== 'done').length || 0;
+  const activeDecisions = decisions?.filter(d => d.status !== 'deprecated').length || 0;
+
+  const navItems: NavItem[] = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'conversations', label: 'Conversations', icon: MessageSquare, getBadge: () => activeConversations },
+    { id: 'tasks', label: 'Tasks', icon: CheckSquare, getBadge: () => openTasks },
+    { id: 'decisions', label: 'Decisions', icon: Lightbulb, getBadge: () => activeDecisions },
+    { id: 'documents', label: 'Documents', icon: FileText },
+    { id: 'activity', label: 'Activity', icon: Activity },
+  ];
 
   return (
     <aside 
@@ -62,9 +78,23 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 p-3 space-y-1">
-        {navItems.map((item) => {
+        {!projectId && (
+          <button
+            onClick={() => onViewChange('projects')}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+              "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+            )}
+          >
+            <FolderOpen className="w-5 h-5 shrink-0" />
+            {!collapsed && <span>Select Project</span>}
+          </button>
+        )}
+        
+        {projectId && navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeView === item.id;
+          const badge = item.getBadge?.();
           
           return (
             <button
@@ -84,14 +114,14 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
               {!collapsed && (
                 <>
                   <span className="flex-1 text-left">{item.label}</span>
-                  {item.badge && (
+                  {badge !== undefined && badge > 0 && (
                     <span className={cn(
                       "px-2 py-0.5 rounded-full text-xs font-medium",
                       isActive 
                         ? "bg-primary/20 text-primary" 
                         : "bg-muted text-muted-foreground"
                     )}>
-                      {item.badge}
+                      {badge}
                     </span>
                   )}
                 </>
@@ -103,17 +133,27 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
       {/* Footer */}
       <div className="p-3 border-t border-sidebar-border space-y-1">
+        {projectId && (
+          <button
+            onClick={() => onViewChange('settings')}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+              activeView === 'settings'
+                ? "bg-sidebar-accent text-sidebar-accent-foreground" 
+                : "text-sidebar-foreground hover:bg-sidebar-accent/50"
+            )}
+          >
+            <Settings className="w-5 h-5 shrink-0" />
+            {!collapsed && <span>Settings</span>}
+          </button>
+        )}
+
         <button
-          onClick={() => onViewChange('settings')}
-          className={cn(
-            "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-            activeView === 'settings'
-              ? "bg-sidebar-accent text-sidebar-accent-foreground" 
-              : "text-sidebar-foreground hover:bg-sidebar-accent/50"
-          )}
+          onClick={() => signOut()}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground hover:bg-destructive/10 hover:text-destructive transition-all duration-200"
         >
-          <Settings className="w-5 h-5 shrink-0" />
-          {!collapsed && <span>Settings</span>}
+          <LogOut className="w-5 h-5 shrink-0" />
+          {!collapsed && <span>Sign Out</span>}
         </button>
 
         <Button
