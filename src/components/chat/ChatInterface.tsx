@@ -8,17 +8,20 @@ import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useFlattenedMessages, useCreateMessage, useUpdateConversationMode, MESSAGE_PAGE_SIZE, type Message } from '@/hooks/useMessages';
-import { useTasks } from '@/hooks/useTasks';
-import { useDecisions } from '@/hooks/useDecisions';
-import { useDocuments } from '@/hooks/useDocuments';
-import { useConversation, useArchiveConversation, useUnarchiveConversation } from '@/hooks/useConversations';
+import { useTasks, useCreateTask } from '@/hooks/useTasks';
+import { useDecisions, useCreateDecision } from '@/hooks/useDecisions';
+import { useDocuments, useCreateDocument } from '@/hooks/useDocuments';
+import { useConversation, useArchiveConversation, useUnarchiveConversation, useCreateConversation } from '@/hooks/useConversations';
 import { useAIContext, getDefaultIncludeMessages, MAX_RECENT_MESSAGES } from '@/hooks/useAIContext';
 import { ChatMessage } from './ChatMessage';
 import { ModeSelector } from './ModeSelector';
 import { ContextPanel } from './ContextPanel';
-import { ConversationHealth } from '@/components/conversations/ConversationHealth';
+import { ConversationHealth, ConversationHealthBanner, type ExtractionType } from '@/components/conversations/ConversationHealth';
 import { SummarizeArchiveModal } from '@/components/conversations/SummarizeArchiveModal';
+import { useToast } from '@/hooks/use-toast';
 import type { Database } from '@/integrations/supabase/types';
+
+const EXTRACT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract`;
 
 type AIMode = Database['public']['Enums']['ai_mode'];
 
@@ -29,6 +32,7 @@ interface ChatInterfaceProps {
   isArchived?: boolean;
   shouldLoadMessages?: boolean;
   onRequestLoadMessages?: () => void;
+  onNavigateToConversation?: (conversationId: string) => void;
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
@@ -40,7 +44,9 @@ export function ChatInterface({
   isArchived = false,
   shouldLoadMessages = true,
   onRequestLoadMessages,
+  onNavigateToConversation,
 }: ChatInterfaceProps) {
+  const { toast } = useToast();
   const { 
     messages, 
     isLoading: messagesLoading, 
@@ -58,6 +64,10 @@ export function ChatInterface({
   const updateMode = useUpdateConversationMode();
   const archiveConversation = useArchiveConversation();
   const unarchiveConversation = useUnarchiveConversation();
+  const createConversation = useCreateConversation();
+  const createTask = useCreateTask();
+  const createDecision = useCreateDecision();
+  const createDocument = useCreateDocument();
   
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -84,6 +94,12 @@ export function ChatInterface({
   // Archive modal state
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   
+  // Health banner dismiss state
+  const [healthBannerDismissed, setHealthBannerDismissed] = useState(false);
+  
+  // Extraction loading state
+  const [isExtracting, setIsExtracting] = useState(false);
+  
   // Scroll management
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -92,6 +108,7 @@ export function ChatInterface({
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   
   const currentMode = (conversation?.mode || 'design') as AIMode;
+  const hasSummary = !!conversation?.summary;
 
   // Build structured AI context
   const aiContext = useAIContext({
@@ -149,6 +166,163 @@ export function ChatInterface({
   const handleModeChange = async (mode: AIMode) => {
     await updateMode.mutateAsync({ id: conversationId, mode });
   };
+
+  // Health action handlers - direct extraction without intermediate state
+  const handleExtract = useCallback(async (type: ExtractionType) => {
+    // Find the most recent assistant message for extraction
+    const lastAssistantMessage = [...messages].reverse().find(m => m.role === 'assistant');
+    if (!lastAssistantMessage) {
+      toast({
+        title: 'No messages to extract from',
+        description: 'Send some messages first to extract tasks or decisions.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsExtracting(true);
+
+    try {
+      const response = await fetch(EXTRACT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ content: lastAssistantMessage.content, extractionType: type }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Extraction failed');
+      }
+
+      const result = await response.json();
+      const data = result.data;
+
+      if (type === 'task') {
+        await createTask.mutateAsync({
+          project_id: projectId,
+          conversation_id: conversationId,
+          title: data.title,
+          description: data.description,
+          next_action: data.next_action,
+          priority: data.priority,
+        });
+        toast({ title: 'Task created', description: data.title });
+      } else if (type === 'decision') {
+        await createDecision.mutateAsync({
+          project_id: projectId,
+          conversation_id: conversationId,
+          title: data.title,
+          decision: data.decision,
+          rationale: data.rationale,
+          impact: data.impact,
+        });
+        toast({ title: 'Decision created', description: data.title });
+      } else if (type === 'document') {
+        await createDocument.mutateAsync({
+          project_id: projectId,
+          title: data.title,
+          content: data.content,
+          is_pinned: data.is_pinned || false,
+        });
+        toast({ title: 'Document created', description: data.title });
+      } else if (type === 'auto') {
+        const { tasks: extractedTasks = [], decisions: extractedDecisions = [], documents: extractedDocs = [] } = data;
+        let created = { tasks: 0, decisions: 0, documents: 0 };
+        
+        for (const task of extractedTasks) {
+          await createTask.mutateAsync({
+            project_id: projectId,
+            conversation_id: conversationId,
+            title: task.title,
+            description: task.description,
+            next_action: task.next_action,
+            priority: task.priority,
+          });
+          created.tasks++;
+        }
+        
+        for (const decision of extractedDecisions) {
+          await createDecision.mutateAsync({
+            project_id: projectId,
+            conversation_id: conversationId,
+            title: decision.title,
+            decision: decision.decision,
+            rationale: decision.rationale,
+            impact: decision.impact,
+          });
+          created.decisions++;
+        }
+        
+        for (const doc of extractedDocs) {
+          await createDocument.mutateAsync({
+            project_id: projectId,
+            title: doc.title,
+            content: doc.content,
+            is_pinned: doc.is_pinned || false,
+          });
+          created.documents++;
+        }
+        
+        const parts = [];
+        if (created.tasks > 0) parts.push(`${created.tasks} task${created.tasks > 1 ? 's' : ''}`);
+        if (created.decisions > 0) parts.push(`${created.decisions} decision${created.decisions > 1 ? 's' : ''}`);
+        if (created.documents > 0) parts.push(`${created.documents} document${created.documents > 1 ? 's' : ''}`);
+        
+        if (parts.length > 0) {
+          toast({ title: 'Extracted', description: `Created ${parts.join(', ')}` });
+        } else {
+          toast({ title: 'No items found', description: 'No actionable items were found.' });
+        }
+      }
+    } catch (error) {
+      console.error('Extraction error:', error);
+      toast({
+        title: 'Extraction failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExtracting(false);
+    }
+  }, [messages, toast, createTask, createDecision, createDocument, projectId, conversationId]);
+
+  const handleNewConversation = useCallback(async () => {
+    try {
+      const newConv = await createConversation.mutateAsync({
+        project_id: projectId,
+        title: `Follow-up: ${conversation?.title || 'New Conversation'}`,
+        purpose: conversation?.purpose || undefined,
+        mode: currentMode,
+      });
+      
+      toast({
+        title: 'New conversation started',
+        description: 'Continuing from where you left off.',
+      });
+      
+      if (onNavigateToConversation) {
+        onNavigateToConversation(newConv.id);
+      }
+    } catch (error) {
+      toast({
+        title: 'Failed to create conversation',
+        variant: 'destructive',
+      });
+    }
+  }, [createConversation, projectId, conversation, currentMode, toast, onNavigateToConversation]);
+
+  const handleGenerateSummary = useCallback(() => {
+    // Open archive modal which has the summary textarea
+    // User can generate or write summary there
+    setArchiveModalOpen(true);
+    toast({
+      title: 'Add a summary',
+      description: 'Write a summary to archive this conversation.',
+    });
+  }, [toast]);
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming || isArchived) return;
@@ -319,7 +493,11 @@ export function ChatInterface({
           {!isArchived && (
             <ConversationHealth 
               messageCount={messageCount} 
+              hasSummary={hasSummary}
               onArchive={() => setArchiveModalOpen(true)}
+              onExtract={handleExtract}
+              onNewConversation={onNavigateToConversation ? handleNewConversation : undefined}
+              onGenerateSummary={handleGenerateSummary}
               compact 
             />
           )}
@@ -381,6 +559,18 @@ export function ChatInterface({
           )}
         </div>
       </div>
+      
+      {/* Health Banner - shows for orange/red states */}
+      {!isArchived && !healthBannerDismissed && (
+        <ConversationHealthBanner
+          messageCount={messageCount}
+          hasSummary={hasSummary}
+          onArchive={() => setArchiveModalOpen(true)}
+          onExtract={handleExtract}
+          onNewConversation={onNavigateToConversation ? handleNewConversation : undefined}
+          onDismiss={() => setHealthBannerDismissed(true)}
+        />
+      )}
       
       <div className="flex flex-1 overflow-hidden">
         {/* Show summary view for archived conversations that haven't loaded messages */}
