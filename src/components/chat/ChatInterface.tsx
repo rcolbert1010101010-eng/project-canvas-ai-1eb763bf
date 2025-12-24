@@ -1,15 +1,18 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
-import { Send, Loader2, Sparkles, Bug, Map, Code, Eye, FileText, CheckSquare, Lightbulb, X, Archive, MessageSquare, ChevronUp } from 'lucide-react';
+import { Send, Loader2, Sparkles, FileText, X, Archive, MessageSquare, ChevronUp, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useFlattenedMessages, useCreateMessage, useUpdateConversationMode, MESSAGE_PAGE_SIZE, type Message } from '@/hooks/useMessages';
 import { useTasks } from '@/hooks/useTasks';
 import { useDecisions } from '@/hooks/useDecisions';
 import { useDocuments } from '@/hooks/useDocuments';
 import { useConversation, useArchiveConversation, useUnarchiveConversation } from '@/hooks/useConversations';
+import { useAIContext, getDefaultIncludeMessages, MAX_RECENT_MESSAGES } from '@/hooks/useAIContext';
 import { ChatMessage } from './ChatMessage';
 import { ModeSelector } from './ModeSelector';
 import { ContextPanel } from './ContextPanel';
@@ -66,11 +69,22 @@ export function ChatInterface({
     documents: string[];
   }>({ tasks: [], decisions: [], documents: [] });
   
+  // Include recent messages toggle - default based on whether summary exists
+  const [includeRecentMessages, setIncludeRecentMessages] = useState(() => 
+    getDefaultIncludeMessages(conversation)
+  );
+  
+  // Update toggle default when conversation loads
+  useEffect(() => {
+    if (conversation) {
+      setIncludeRecentMessages(getDefaultIncludeMessages(conversation));
+    }
+  }, [conversation?.id, conversation?.summary]);
+  
   // Archive modal state
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   
   // Scroll management
-  const scrollRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
@@ -78,6 +92,16 @@ export function ChatInterface({
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   
   const currentMode = (conversation?.mode || 'design') as AIMode;
+
+  // Build structured AI context
+  const aiContext = useAIContext({
+    conversation: conversation || null,
+    tasks,
+    decisions,
+    documents,
+    messages,
+    includeRecentMessages,
+  });
 
   // Scroll to bottom for new messages (only if user was at bottom)
   useEffect(() => {
@@ -126,39 +150,6 @@ export function ChatInterface({
     await updateMode.mutateAsync({ id: conversationId, mode });
   };
 
-  const buildContext = useCallback(() => {
-    const contextTasks = tasks
-      .filter(t => selectedContext.tasks.includes(t.id))
-      .map(t => ({
-        title: t.title,
-        status: t.status,
-        priority: t.priority,
-        description: t.description || undefined,
-      }));
-    
-    const contextDecisions = decisions
-      .filter(d => selectedContext.decisions.includes(d.id))
-      .map(d => ({
-        title: d.title,
-        decision: d.decision,
-        status: d.status,
-        impact: d.impact,
-      }));
-    
-    const contextDocuments = documents
-      .filter(d => selectedContext.documents.includes(d.id))
-      .map(d => ({
-        title: d.title,
-        content: d.content,
-      }));
-    
-    return {
-      tasks: contextTasks,
-      decisions: contextDecisions,
-      documents: contextDocuments,
-    };
-  }, [tasks, decisions, documents, selectedContext]);
-
   const handleSend = async () => {
     if (!input.trim() || isStreaming || isArchived) return;
     
@@ -166,7 +157,7 @@ export function ChatInterface({
     setInput('');
     setIsStreaming(true);
     setStreamingContent('');
-    setShouldScrollToBottom(true); // Scroll to bottom for new messages
+    setShouldScrollToBottom(true);
     
     // Save user message
     await createMessage.mutateAsync({
@@ -175,13 +166,8 @@ export function ChatInterface({
       content: userMessage,
     });
     
-    // Build messages for API - send only loaded messages for context
-    const apiMessages = [
-      ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-      { role: 'user' as const, content: userMessage },
-    ];
-    
     try {
+      // Send structured context to edge function - NO full history
       const response = await fetch(CHAT_URL, {
         method: 'POST',
         headers: {
@@ -189,9 +175,8 @@ export function ChatInterface({
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({
-          messages: apiMessages,
-          mode: currentMode,
-          context: buildContext(),
+          userMessage,
+          context: aiContext,
         }),
       });
       
@@ -340,6 +325,41 @@ export function ChatInterface({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Recent Messages Toggle */}
+          {!isArchived && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-secondary/50">
+                    <History className={cn(
+                      "w-3.5 h-3.5 transition-colors",
+                      includeRecentMessages ? "text-primary" : "text-muted-foreground"
+                    )} />
+                    <Label htmlFor="include-messages" className="text-xs text-muted-foreground cursor-pointer">
+                      Last {MAX_RECENT_MESSAGES}
+                    </Label>
+                    <Switch
+                      id="include-messages"
+                      checked={includeRecentMessages}
+                      onCheckedChange={setIncludeRecentMessages}
+                      className="scale-75"
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p className="text-xs">
+                    {includeRecentMessages 
+                      ? `Include last ${MAX_RECENT_MESSAGES} messages in AI context` 
+                      : conversation?.summary 
+                        ? "Using conversation summary instead of message history"
+                        : "Enable to include recent messages in AI context"
+                    }
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          
           {!isArchived && (
             <Button
               variant={showContext ? 'secondary' : 'ghost'}
@@ -407,7 +427,7 @@ export function ChatInterface({
                     <h3 className="text-lg font-medium text-foreground mb-2">Start the conversation</h3>
                     <p className="text-sm text-muted-foreground max-w-md">
                       Ask questions, get help with your project, or explore ideas. 
-                      Add context from tasks, decisions, or documents for more relevant responses.
+                      The AI uses structured memory from your project context.
                     </p>
                   </div>
                 ) : (
