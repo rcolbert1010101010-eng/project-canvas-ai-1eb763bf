@@ -1,8 +1,19 @@
--- Add message_count column to conversations
-ALTER TABLE public.conversations 
-ADD COLUMN message_count integer NOT NULL DEFAULT 0;
+-- Add message_count column to conversations (idempotent)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name   = 'conversations'
+      AND column_name  = 'message_count'
+  ) THEN
+    ALTER TABLE public.conversations
+      ADD COLUMN message_count integer NOT NULL DEFAULT 0;
+  END IF;
+END $$;
 
--- Backfill existing data
+-- Backfill existing data (safe for all convos, including those with zero messages)
 UPDATE public.conversations c
 SET message_count = COALESCE(m.cnt, 0)
 FROM (
@@ -11,6 +22,11 @@ FROM (
   GROUP BY conversation_id
 ) m
 WHERE c.id = m.conversation_id;
+
+-- Ensure conversations with no messages are explicitly 0 (defensive)
+UPDATE public.conversations
+SET message_count = 0
+WHERE message_count IS NULL;
 
 -- Create trigger function for insert
 CREATE OR REPLACE FUNCTION public.increment_conversation_message_count()
