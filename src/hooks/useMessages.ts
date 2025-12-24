@@ -12,7 +12,12 @@ export interface Message {
   created_at: string;
 }
 
-export function useMessages(conversationId: string | null) {
+/**
+ * Fetch messages for a conversation.
+ * @param conversationId - The conversation ID
+ * @param enabled - Whether to auto-fetch (default: true). Set to false for archived conversations.
+ */
+export function useMessages(conversationId: string | null, enabled: boolean = true) {
   return useQuery({
     queryKey: ['messages', conversationId],
     queryFn: async () => {
@@ -27,7 +32,7 @@ export function useMessages(conversationId: string | null) {
       if (error) throw error;
       return data as Message[];
     },
-    enabled: !!conversationId,
+    enabled: !!conversationId && enabled,
   });
 }
 

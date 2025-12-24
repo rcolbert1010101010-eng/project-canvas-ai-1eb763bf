@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MessageSquare, Archive, Clock, ChevronDown, Sparkles, Bug, Map, Code, Eye, Plus } from 'lucide-react';
+import { MessageSquare, Archive, Clock, ChevronDown, Sparkles, Bug, Map, Code, Eye, Plus, RotateCcw } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,9 +8,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { useConversations, useCreateConversation, useArchiveConversation, type Conversation } from '@/hooks/useConversations';
+import { useConversations, useCreateConversation, useArchiveConversation, useUnarchiveConversation, type Conversation } from '@/hooks/useConversations';
 import { ChatInterface } from '@/components/chat/ChatInterface';
 import { ConversationHealth } from './ConversationHealth';
+import { SummarizeArchiveModal } from './SummarizeArchiveModal';
 import type { Database } from '@/integrations/supabase/types';
 
 type AIMode = Database['public']['Enums']['ai_mode'];
@@ -39,6 +40,7 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
   const { data: conversations, isLoading } = useConversations(projectId);
   const createConversation = useCreateConversation();
   const archiveConversation = useArchiveConversation();
+  const unarchiveConversation = useUnarchiveConversation();
   
   const [showArchived, setShowArchived] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -46,6 +48,13 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
   const [newTitle, setNewTitle] = useState('');
   const [newPurpose, setNewPurpose] = useState('');
   const [newMode, setNewMode] = useState<AIMode>('design');
+  
+  // State for archive modal
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
+  const [conversationToArchive, setConversationToArchive] = useState<Conversation | null>(null);
+  
+  // State for archived conversation message loading
+  const [loadMessagesForId, setLoadMessagesForId] = useState<string | null>(null);
   
   const activeConversations = conversations?.filter(c => !c.is_archived) || [];
   const archivedConversations = conversations?.filter(c => c.is_archived) || [];
@@ -78,8 +87,31 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
     setActiveConversationId(result.id);
   };
 
-  const handleArchive = async (id: string) => {
-    await archiveConversation.mutateAsync({ id });
+  const handleOpenArchiveModal = (conversation: Conversation) => {
+    setConversationToArchive(conversation);
+    setArchiveModalOpen(true);
+  };
+
+  const handleArchiveConfirm = async (summary: string, purpose?: string) => {
+    if (!conversationToArchive) return;
+    
+    await archiveConversation.mutateAsync({ 
+      id: conversationToArchive.id, 
+      summary,
+      purpose,
+    });
+    
+    setArchiveModalOpen(false);
+    setConversationToArchive(null);
+  };
+
+  const handleUnarchive = async (id: string) => {
+    await unarchiveConversation.mutateAsync({ id });
+  };
+
+  const handleLoadMessages = (conversationId: string) => {
+    setLoadMessagesForId(conversationId);
+    setActiveConversationId(conversationId);
   };
 
   const ConversationCard = ({ conversation, isArchived = false }: { conversation: Conversation; isArchived?: boolean }) => {
@@ -90,7 +122,7 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
         variant="interactive"
         className={cn(
           "transition-all duration-200",
-          isArchived && "opacity-70"
+          isArchived && "opacity-80"
         )}
       >
         <CardContent className="p-4">
@@ -110,23 +142,34 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
                 )}
               </div>
               
-              <p className="text-sm text-muted-foreground line-clamp-1">{conversation.purpose}</p>
+              {conversation.purpose && (
+                <p className="text-sm text-muted-foreground line-clamp-1">{conversation.purpose}</p>
+              )}
               
+              {/* Summary-first display for archived conversations */}
               {isArchived && conversation.summary && (
-                <p className="text-sm text-muted-foreground/80 mt-2 p-2 bg-secondary/30 rounded-md line-clamp-2">
-                  {conversation.summary}
-                </p>
+                <div className="mt-2 p-3 bg-secondary/40 rounded-lg border border-border/50">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Summary</p>
+                  <p className="text-sm text-foreground">{conversation.summary}</p>
+                </div>
               )}
               
               <div className="flex items-center gap-3 mt-3">
                 <Badge variant="secondary" className="text-xs">
                   {conversation.mode}
                 </Badge>
-                <ConversationHealth 
-                  messageCount={conversation.message_count || 0} 
-                  onArchive={() => handleArchive(conversation.id)}
-                  compact 
-                />
+                {!isArchived && (
+                  <ConversationHealth 
+                    messageCount={conversation.message_count || 0} 
+                    onArchive={() => handleOpenArchiveModal(conversation)}
+                    compact 
+                  />
+                )}
+                {isArchived && conversation.message_count && (
+                  <span className="text-xs text-muted-foreground">
+                    {conversation.message_count} messages
+                  </span>
+                )}
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
                   <Clock className="w-3 h-3" />
                   {formatDate(conversation.created_at)}
@@ -138,22 +181,42 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
           <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border">
             {isArchived ? (
               <>
-                <Button variant="ghost" size="sm" className="flex-1" onClick={() => setActiveConversationId(conversation.id)}>Load Messages</Button>
-                <Button variant="ghost" size="sm" className="flex-1">Unarchive</Button>
-              </>
-            ) : (
-              <>
-                <Button variant="default" size="sm" className="flex-1" onClick={() => setActiveConversationId(conversation.id)}>Continue</Button>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="flex-1" 
+                  onClick={() => handleLoadMessages(conversation.id)}
+                >
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Load Messages
+                </Button>
                 <Button 
                   variant="ghost" 
                   size="sm" 
                   className="flex-1"
+                  onClick={() => handleUnarchive(conversation.id)}
+                  disabled={unarchiveConversation.isPending}
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Unarchive
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="default" size="sm" className="flex-1" onClick={() => setActiveConversationId(conversation.id)}>
+                  Continue
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="flex-1 gap-2"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleArchive(conversation.id);
+                    handleOpenArchiveModal(conversation);
                   }}
                 >
-                  Archive
+                  <Archive className="w-4 h-4" />
+                  Summarize & Archive
                 </Button>
               </>
             )}
@@ -165,12 +228,22 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
 
   // Show chat interface if conversation is active
   if (activeConversationId) {
+    const activeConv = conversations?.find(c => c.id === activeConversationId);
+    const isArchivedConversation = activeConv?.is_archived ?? false;
+    const shouldLoadMessages = !isArchivedConversation || loadMessagesForId === activeConversationId;
+    
     return (
       <div className="h-[calc(100vh-4rem)]">
         <ChatInterface 
           conversationId={activeConversationId} 
           projectId={projectId} 
-          onClose={() => setActiveConversationId(null)}
+          onClose={() => {
+            setActiveConversationId(null);
+            setLoadMessagesForId(null);
+          }}
+          isArchived={isArchivedConversation}
+          shouldLoadMessages={shouldLoadMessages}
+          onRequestLoadMessages={() => setLoadMessagesForId(activeConversationId)}
         />
       </div>
     );
@@ -293,6 +366,16 @@ export function ConversationsList({ projectId }: ConversationsListProps) {
           )}
         </div>
       )}
+
+      {/* Summarize & Archive Modal */}
+      <SummarizeArchiveModal
+        open={archiveModalOpen}
+        onOpenChange={setArchiveModalOpen}
+        conversationTitle={conversationToArchive?.title || ''}
+        currentPurpose={conversationToArchive?.purpose}
+        onConfirm={handleArchiveConfirm}
+        isPending={archiveConversation.isPending}
+      />
     </div>
   );
 }
