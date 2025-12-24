@@ -111,11 +111,26 @@ export function ChatInterface({
   const hasSummary = !!conversation?.summary;
 
   // Build structured AI context
+  const filteredTasks =
+    selectedContext.tasks.length > 0
+      ? tasks.filter((t) => selectedContext.tasks.includes(t.id))
+      : tasks;
+
+  const filteredDecisions =
+    selectedContext.decisions.length > 0
+      ? decisions.filter((d) => selectedContext.decisions.includes(d.id))
+      : decisions;
+
+  const filteredDocuments =
+    selectedContext.documents.length > 0
+      ? documents.filter((d) => selectedContext.documents.includes(d.id))
+      : documents;
+
   const aiContext = useAIContext({
     conversation: conversation || null,
-    tasks,
-    decisions,
-    documents,
+    tasks: filteredTasks,
+    decisions: filteredDecisions,
+    documents: filteredDocuments,
     messages,
     includeRecentMessages,
   });
@@ -547,7 +562,7 @@ export function ChatInterface({
               className="gap-2"
             >
               <FileText className="w-4 h-4" />
-              Context
+              Add Context
               {contextCount > 0 && (
                 <Badge variant="secondary" className="ml-1">{contextCount}</Badge>
               )}
@@ -645,6 +660,48 @@ export function ChatInterface({
               {/* Input - disabled for archived conversations */}
               {!isArchived && (
                 <div className="p-4 border-t border-border bg-card">
+                  {(selectedContext.tasks.length + selectedContext.decisions.length + selectedContext.documents.length) > 0 && (
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      {selectedContext.tasks.length > 0 && (
+                        <Badge
+                          variant="secondary"
+                          className="cursor-pointer"
+                          onClick={() => setSelectedContext({ ...selectedContext, tasks: [] })}
+                          title="Click to clear selected tasks"
+                        >
+                          Tasks ({selectedContext.tasks.length})
+                        </Badge>
+                      )}
+                      {selectedContext.decisions.length > 0 && (
+                        <Badge
+                          variant="secondary"
+                          className="cursor-pointer"
+                          onClick={() => setSelectedContext({ ...selectedContext, decisions: [] })}
+                          title="Click to clear selected decisions"
+                        >
+                          Decisions ({selectedContext.decisions.length})
+                        </Badge>
+                      )}
+                      {selectedContext.documents.length > 0 && (
+                        <Badge
+                          variant="secondary"
+                          className="cursor-pointer"
+                          onClick={() => setSelectedContext({ ...selectedContext, documents: [] })}
+                          title="Click to clear selected documents"
+                        >
+                          Docs ({selectedContext.documents.length})
+                        </Badge>
+                      )}
+                      <Badge
+                        variant="outline"
+                        className="cursor-pointer"
+                        onClick={() => setSelectedContext({ tasks: [], decisions: [], documents: [] })}
+                        title="Clear all selected context"
+                      >
+                        Clear
+                      </Badge>
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <Textarea
                       ref={textareaRef}

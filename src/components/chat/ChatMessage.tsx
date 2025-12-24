@@ -48,7 +48,7 @@ export function ChatMessage({ message, isStreaming, projectId }: ChatMessageProp
               projectId={projectId}
               conversationId={message.conversation_id}
               className={cn(
-                "opacity-0 group-hover:opacity-100 transition-opacity",
+                "transition-opacity",
                 isUser ? "text-primary-foreground hover:bg-primary-foreground/20" : ""
               )}
             />

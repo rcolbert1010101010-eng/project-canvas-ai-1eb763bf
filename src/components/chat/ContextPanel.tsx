@@ -56,11 +56,19 @@ export function ContextPanel({
 
   const totalSelected = selectedContext.tasks.length + selectedContext.decisions.length + selectedContext.documents.length;
 
+  const visibleTasks = tasks.filter((t) => {
+    const s = String((t as any).status || "").toLowerCase();
+    return s !== "done" && s !== "completed" && s !== "closed";
+  });
+
   return (
     <div className="w-80 border-l border-border bg-card flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-sm">Add Context</span>
+          <div className="flex flex-col">
+            <span className="font-medium text-sm">Add Context</span>
+            <span className="text-xs text-muted-foreground">Selected items will be included in the next message.</span>
+          </div>
           {totalSelected > 0 && (
             <Badge variant="secondary">{totalSelected} selected</Badge>
           )}
@@ -84,13 +92,13 @@ export function ContextPanel({
             <div className="flex items-center gap-2 mb-3">
               <CheckSquare className="w-4 h-4 text-info" />
               <span className="text-sm font-medium">Tasks</span>
-              <Badge variant="outline" className="ml-auto">{tasks.length}</Badge>
+              <Badge variant="outline" className="ml-auto">{visibleTasks.length}</Badge>
             </div>
-            {tasks.length === 0 ? (
+            {visibleTasks.length === 0 ? (
               <p className="text-sm text-muted-foreground">No tasks available</p>
             ) : (
               <div className="space-y-2">
-                {tasks.slice(0, 10).map((task) => (
+                {visibleTasks.slice(0, 10).map((task) => (
                   <label
                     key={task.id}
                     className={cn(
