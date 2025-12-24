@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { CheckCircle2, Circle, Clock, AlertCircle, ChevronRight, Filter, Plus } from 'lucide-react';
+import { logActivity } from '@/lib/activityLog';
+import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,6 +31,7 @@ interface TasksViewProps {
 }
 
 export function TasksView({ projectId }: TasksViewProps) {
+  const { user } = useAuth();
   const { data: tasks, isLoading } = useTasks(projectId);
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
@@ -61,9 +64,24 @@ export function TasksView({ projectId }: TasksViewProps) {
     setNewPriority('medium');
   };
 
-  const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
-    await updateTask.mutateAsync({ id: taskId, status: newStatus });
-  };
+  const handleStatusChange = async (task: Task, newStatus: TaskStatus) => {
+  const oldStatus = task.status;
+
+  await updateTask.mutateAsync({ id: task.id, status: newStatus });
+
+  // Best-effort activity log (never blocks UX)
+  if (user?.id) {
+    void logActivity({
+      projectId,
+      actorId: user.id,
+      eventType: "task.status_changed",
+      entityType: "task",
+      entityId: task.id,
+      summary: Task status changed  -> : ,
+      metadata: { from: oldStatus, to: newStatus },
+    });
+  }
+};
 
   const TaskCard = ({ task }: { task: Task }) => {
     const StatusIcon = statusConfig[task.status].icon;
@@ -136,7 +154,7 @@ export function TasksView({ projectId }: TasksViewProps) {
                         size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleStatusChange(task.id, 'done');
+                          handleStatusChange(task, 'done');
                         }}
                       >
                         Mark Done
@@ -148,7 +166,7 @@ export function TasksView({ projectId }: TasksViewProps) {
                         size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleStatusChange(task.id, 'in_progress');
+                          handleStatusChange(task, 'in_progress');
                         }}
                       >
                         Start
