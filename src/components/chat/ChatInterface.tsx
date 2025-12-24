@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Loader2, Sparkles, Bug, Map, Code, Eye, FileText, CheckSquare, Lightbulb, X, Archive, MessageSquare } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
+import { Send, Loader2, Sparkles, Bug, Map, Code, Eye, FileText, CheckSquare, Lightbulb, X, Archive, MessageSquare, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { useMessages, useCreateMessage, useUpdateConversationMode, type Message } from '@/hooks/useMessages';
+import { useFlattenedMessages, useCreateMessage, useUpdateConversationMode, MESSAGE_PAGE_SIZE, type Message } from '@/hooks/useMessages';
 import { useTasks } from '@/hooks/useTasks';
 import { useDecisions } from '@/hooks/useDecisions';
 import { useDocuments } from '@/hooks/useDocuments';
@@ -38,7 +38,14 @@ export function ChatInterface({
   shouldLoadMessages = true,
   onRequestLoadMessages,
 }: ChatInterfaceProps) {
-  const { data: messages = [], isLoading: messagesLoading } = useMessages(conversationId, shouldLoadMessages);
+  const { 
+    messages, 
+    isLoading: messagesLoading, 
+    isFetchingNextPage,
+    hasOlderMessages,
+    fetchOlderMessages,
+  } = useFlattenedMessages(conversationId, shouldLoadMessages);
+  
   const { data: conversation } = useConversation(conversationId);
   const { data: tasks = [] } = useTasks(projectId);
   const { data: decisions = [] } = useDecisions(projectId);
@@ -62,17 +69,33 @@ export function ChatInterface({
   // Archive modal state
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   
+  // Scroll management
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
+  const [scrollHeightBefore, setScrollHeightBefore] = useState(0);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   
   const currentMode = (conversation?.mode || 'design') as AIMode;
 
-  // Auto-scroll to bottom
+  // Scroll to bottom for new messages (only if user was at bottom)
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (shouldScrollToBottom && scrollContainerRef.current && !isLoadingOlder) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
     }
-  }, [messages, streamingContent]);
+  }, [messages.length, streamingContent, shouldScrollToBottom, isLoadingOlder]);
+
+  // Preserve scroll position when prepending older messages
+  useLayoutEffect(() => {
+    if (isLoadingOlder && scrollContainerRef.current && scrollHeightBefore > 0) {
+      const newScrollHeight = scrollContainerRef.current.scrollHeight;
+      const scrollDiff = newScrollHeight - scrollHeightBefore;
+      scrollContainerRef.current.scrollTop = scrollDiff;
+      setIsLoadingOlder(false);
+      setScrollHeightBefore(0);
+    }
+  }, [messages, isLoadingOlder, scrollHeightBefore]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -81,6 +104,23 @@ export function ChatInterface({
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
     }
   }, [input]);
+
+  // Track scroll position to determine if we should auto-scroll
+  const handleScroll = useCallback(() => {
+    if (scrollContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+      setShouldScrollToBottom(isAtBottom);
+    }
+  }, []);
+
+  const handleLoadOlderMessages = useCallback(async () => {
+    if (scrollContainerRef.current) {
+      setScrollHeightBefore(scrollContainerRef.current.scrollHeight);
+      setIsLoadingOlder(true);
+    }
+    await fetchOlderMessages();
+  }, [fetchOlderMessages]);
 
   const handleModeChange = async (mode: AIMode) => {
     await updateMode.mutateAsync({ id: conversationId, mode });
@@ -126,6 +166,7 @@ export function ChatInterface({
     setInput('');
     setIsStreaming(true);
     setStreamingContent('');
+    setShouldScrollToBottom(true); // Scroll to bottom for new messages
     
     // Save user message
     await createMessage.mutateAsync({
@@ -134,7 +175,7 @@ export function ChatInterface({
       content: userMessage,
     });
     
-    // Build messages for API
+    // Build messages for API - send only loaded messages for context
     const apiMessages = [
       ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
       { role: 'user' as const, content: userMessage },
@@ -329,7 +370,31 @@ export function ChatInterface({
           <>
             {/* Messages */}
             <div className="flex-1 flex flex-col min-w-0">
-              <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+              <div 
+                ref={scrollContainerRef}
+                className="flex-1 overflow-y-auto p-4"
+                onScroll={handleScroll}
+              >
+                {/* Load older messages button */}
+                {hasOlderMessages && !messagesLoading && (
+                  <div className="flex justify-center mb-4">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleLoadOlderMessages}
+                      disabled={isFetchingNextPage}
+                      className="gap-2 text-muted-foreground hover:text-foreground"
+                    >
+                      {isFetchingNextPage ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4" />
+                      )}
+                      Load older messages
+                    </Button>
+                  </div>
+                )}
+
                 {messagesLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -364,7 +429,7 @@ export function ChatInterface({
                     )}
                   </div>
                 )}
-              </ScrollArea>
+              </div>
               
               {/* Input - disabled for archived conversations */}
               {!isArchived && (
