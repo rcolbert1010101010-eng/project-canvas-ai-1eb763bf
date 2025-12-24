@@ -74,14 +74,12 @@ export function TasksView({ projectId }: TasksViewProps) {
 
   // Best-effort activity log (never blocks UX)
   if (user?.id) {
-    void logActivity({
+    await logActivity({
       projectId,
-      actorId: user.id,
-      eventType: "task.status_changed",
+      type: "task_status_changed",
       entityType: "task",
       entityId: task.id,
-      summary: `Task status changed ${oldStatus} -> ${newStatus}: ${task.title}`,
-      metadata: { from: oldStatus, to: newStatus },
+      description: `Task status changed ${oldStatus} -> ${newStatus}: ${task.title}`,
     });
   }
 };
