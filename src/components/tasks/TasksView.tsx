@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type * as React from 'react';
 import { CheckCircle2, Circle, Clock, AlertCircle, ChevronRight, Filter, Plus } from 'lucide-react';
 import { logActivity } from '@/lib/activityLog';
 import { useAuth } from '@/hooks/useAuth';
@@ -77,7 +78,7 @@ export function TasksView({ projectId }: TasksViewProps) {
       eventType: "task.status_changed",
       entityType: "task",
       entityId: task.id,
-      summary: Task status changed  -> : ,
+      summary: `Task status changed ${oldStatus} -> ${newStatus}: ${task.title}`,
       metadata: { from: oldStatus, to: newStatus },
     });
   }
