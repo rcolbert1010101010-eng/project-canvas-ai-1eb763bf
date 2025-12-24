@@ -1,33 +1,35 @@
 // src/lib/activityLog.ts
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+
+type ActivityType = Database["public"]["Enums"]["activity_type"];
 
 type ActivityEvent = {
   projectId: string;
-  actorId: string;
-  eventType: string;   // e.g. "task.status_changed"
-  entityType: string;  // e.g. "task"
-  entityId: string;
-  summary: string;
-  metadata?: Record<string, any>;
+  type: ActivityType;     // activity_logs.type (enum)
+  entityType: string;     // activity_logs.entity_type
+  entityId: string;       // activity_logs.entity_id
+  description: string;    // activity_logs.description
 };
 
-/**
- * Best-effort activity logging: failures never break the main UX.
- */
-export async function logActivity(e: ActivityEvent) {
+export async function logActivity(e: ActivityEvent): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     const { error } = await supabase.from("activity_logs").insert({
       project_id: e.projectId,
-      actor_id: e.actorId,
-      event_type: e.eventType,
+      type: e.type,
       entity_type: e.entityType,
       entity_id: e.entityId,
-      summary: e.summary,
-      metadata: e.metadata ?? {},
+      description: e.description,
     });
 
-    if (error) console.warn("Activity log insert failed:", error);
-  } catch (err) {
+    if (error) {
+      console.warn("Activity log insert failed:", error);
+      return { ok: false, message: error.message ?? "Unknown Supabase error" };
+    }
+
+    return { ok: true };
+  } catch (err: any) {
     console.warn("Activity log insert threw:", err);
+    return { ok: false, message: err?.message ?? "Unknown error" };
   }
 }

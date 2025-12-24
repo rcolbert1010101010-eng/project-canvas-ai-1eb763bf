@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 import { useTasks, useCreateTask, useUpdateTask, type Task } from '@/hooks/useTasks';
 import type { Database } from '@/integrations/supabase/types';
 
@@ -33,6 +34,7 @@ interface TasksViewProps {
 
 export function TasksView({ projectId }: TasksViewProps) {
   const { user } = useAuth();
+  const { toast } = useToast();
   const { data: tasks, isLoading } = useTasks(projectId);
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
