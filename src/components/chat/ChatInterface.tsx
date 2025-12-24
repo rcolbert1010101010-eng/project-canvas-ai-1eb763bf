@@ -423,7 +423,8 @@ export function ChatInterface({
   };
 
   const contextCount = selectedContext.tasks.length + selectedContext.decisions.length + selectedContext.documents.length;
-  const messageCount = messages.length + (streamingContent ? 1 : 0);
+  // Use denormalized message_count from conversation for accurate health calculation
+  const effectiveMessageCount = (conversation?.message_count ?? 0) + (isStreaming ? 1 : 0);
 
   const handleArchiveConfirm = async (summary: string, purpose?: string) => {
     await archiveConversation.mutateAsync({ id: conversationId, summary, purpose });
@@ -492,7 +493,7 @@ export function ChatInterface({
           )}
           {!isArchived && (
             <ConversationHealth 
-              messageCount={messageCount} 
+              messageCount={effectiveMessageCount} 
               hasSummary={hasSummary}
               onArchive={() => setArchiveModalOpen(true)}
               onExtract={handleExtract}
@@ -563,7 +564,7 @@ export function ChatInterface({
       {/* Health Banner - shows for orange/red states */}
       {!isArchived && !healthBannerDismissed && (
         <ConversationHealthBanner
-          messageCount={messageCount}
+          messageCount={effectiveMessageCount}
           hasSummary={hasSummary}
           onArchive={() => setArchiveModalOpen(true)}
           onExtract={handleExtract}

@@ -57,6 +57,7 @@ export type Database = {
           created_at: string
           id: string
           is_archived: boolean
+          message_count: number
           mode: Database["public"]["Enums"]["ai_mode"]
           project_id: string
           purpose: string | null
@@ -68,6 +69,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_archived?: boolean
+          message_count?: number
           mode?: Database["public"]["Enums"]["ai_mode"]
           project_id: string
           purpose?: string | null
@@ -79,6 +81,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_archived?: boolean
+          message_count?: number
           mode?: Database["public"]["Enums"]["ai_mode"]
           project_id?: string
           purpose?: string | null

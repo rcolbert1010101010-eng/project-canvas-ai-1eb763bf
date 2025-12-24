@@ -15,7 +15,7 @@ export interface Conversation {
   mode: AIMode;
   created_at: string;
   updated_at: string;
-  message_count?: number;
+  message_count: number;
 }
 
 export function useConversations(projectId: string | null) {
@@ -26,16 +26,13 @@ export function useConversations(projectId: string | null) {
       
       const { data, error } = await supabase
         .from('conversations')
-        .select('*, messages(count)')
+        .select('*')
         .eq('project_id', projectId)
         .order('updated_at', { ascending: false });
       
       if (error) throw error;
       
-      return data.map((conv: any) => ({
-        ...conv,
-        message_count: conv.messages?.[0]?.count || 0,
-      })) as Conversation[];
+      return data as Conversation[];
     },
     enabled: !!projectId,
   });
