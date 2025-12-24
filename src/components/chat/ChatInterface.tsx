@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Loader2, Sparkles, Bug, Map, Code, Eye, FileText, CheckSquare, Lightbulb, X } from 'lucide-react';
+import { Send, Loader2, Sparkles, Bug, Map, Code, Eye, FileText, CheckSquare, Lightbulb, X, Archive, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -9,11 +9,12 @@ import { useMessages, useCreateMessage, useUpdateConversationMode, type Message 
 import { useTasks } from '@/hooks/useTasks';
 import { useDecisions } from '@/hooks/useDecisions';
 import { useDocuments } from '@/hooks/useDocuments';
-import { useConversation, useArchiveConversation } from '@/hooks/useConversations';
+import { useConversation, useArchiveConversation, useUnarchiveConversation } from '@/hooks/useConversations';
 import { ChatMessage } from './ChatMessage';
 import { ModeSelector } from './ModeSelector';
 import { ContextPanel } from './ContextPanel';
 import { ConversationHealth } from '@/components/conversations/ConversationHealth';
+import { SummarizeArchiveModal } from '@/components/conversations/SummarizeArchiveModal';
 import type { Database } from '@/integrations/supabase/types';
 
 type AIMode = Database['public']['Enums']['ai_mode'];
@@ -22,12 +23,22 @@ interface ChatInterfaceProps {
   conversationId: string;
   projectId: string;
   onClose?: () => void;
+  isArchived?: boolean;
+  shouldLoadMessages?: boolean;
+  onRequestLoadMessages?: () => void;
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
-export function ChatInterface({ conversationId, projectId, onClose }: ChatInterfaceProps) {
-  const { data: messages = [], isLoading: messagesLoading } = useMessages(conversationId);
+export function ChatInterface({ 
+  conversationId, 
+  projectId, 
+  onClose,
+  isArchived = false,
+  shouldLoadMessages = true,
+  onRequestLoadMessages,
+}: ChatInterfaceProps) {
+  const { data: messages = [], isLoading: messagesLoading } = useMessages(conversationId, shouldLoadMessages);
   const { data: conversation } = useConversation(conversationId);
   const { data: tasks = [] } = useTasks(projectId);
   const { data: decisions = [] } = useDecisions(projectId);
@@ -36,6 +47,7 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
   const createMessage = useCreateMessage();
   const updateMode = useUpdateConversationMode();
   const archiveConversation = useArchiveConversation();
+  const unarchiveConversation = useUnarchiveConversation();
   
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -46,6 +58,9 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
     decisions: string[];
     documents: string[];
   }>({ tasks: [], decisions: [], documents: [] });
+  
+  // Archive modal state
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -105,7 +120,7 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
   }, [tasks, decisions, documents, selectedContext]);
 
   const handleSend = async () => {
-    if (!input.trim() || isStreaming) return;
+    if (!input.trim() || isStreaming || isArchived) return;
     
     const userMessage = input.trim();
     setInput('');
@@ -210,37 +225,94 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
   const contextCount = selectedContext.tasks.length + selectedContext.decisions.length + selectedContext.documents.length;
   const messageCount = messages.length + (streamingContent ? 1 : 0);
 
-  const handleArchive = async () => {
-    await archiveConversation.mutateAsync({ id: conversationId });
+  const handleArchiveConfirm = async (summary: string, purpose?: string) => {
+    await archiveConversation.mutateAsync({ id: conversationId, summary, purpose });
+    setArchiveModalOpen(false);
     onClose?.();
   };
+
+  const handleUnarchive = async () => {
+    await unarchiveConversation.mutateAsync({ id: conversationId });
+  };
+
+  // Archived conversation summary view (before loading messages)
+  const renderArchivedSummaryView = () => (
+    <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+      <div className="w-16 h-16 rounded-full bg-secondary/50 flex items-center justify-center mb-6">
+        <Archive className="w-8 h-8 text-muted-foreground" />
+      </div>
+      
+      <h3 className="text-xl font-semibold text-foreground mb-2">{conversation?.title}</h3>
+      
+      {conversation?.purpose && (
+        <p className="text-muted-foreground mb-4 max-w-md">{conversation.purpose}</p>
+      )}
+      
+      {conversation?.summary && (
+        <div className="w-full max-w-lg p-4 bg-secondary/40 rounded-lg border border-border/50 mb-6 text-left">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Summary</p>
+          <p className="text-sm text-foreground leading-relaxed">{conversation.summary}</p>
+        </div>
+      )}
+      
+      <div className="flex items-center gap-3">
+        <Button 
+          variant="default" 
+          onClick={onRequestLoadMessages}
+          className="gap-2"
+        >
+          <MessageSquare className="w-4 h-4" />
+          Load Messages
+        </Button>
+        <Button 
+          variant="ghost" 
+          onClick={handleUnarchive}
+          disabled={unarchiveConversation.isPending}
+        >
+          Unarchive
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card">
         <div className="flex items-center gap-3">
-          <ModeSelector currentMode={currentMode} onModeChange={handleModeChange} />
+          {!isArchived && (
+            <ModeSelector currentMode={currentMode} onModeChange={handleModeChange} />
+          )}
           <span className="text-sm text-muted-foreground">{conversation?.title}</span>
-          <ConversationHealth 
-            messageCount={messageCount} 
-            onArchive={handleArchive}
-            compact 
-          />
+          {isArchived && (
+            <Badge variant="secondary" className="gap-1">
+              <Archive className="w-3 h-3" />
+              Archived
+            </Badge>
+          )}
+          {!isArchived && (
+            <ConversationHealth 
+              messageCount={messageCount} 
+              onArchive={() => setArchiveModalOpen(true)}
+              compact 
+            />
+          )}
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant={showContext ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setShowContext(!showContext)}
-            className="gap-2"
-          >
-            <FileText className="w-4 h-4" />
-            Context
-            {contextCount > 0 && (
-              <Badge variant="secondary" className="ml-1">{contextCount}</Badge>
-            )}
-          </Button>
+          {!isArchived && (
+            <Button
+              variant={showContext ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setShowContext(!showContext)}
+              className="gap-2"
+            >
+              <FileText className="w-4 h-4" />
+              Context
+              {contextCount > 0 && (
+                <Badge variant="secondary" className="ml-1">{contextCount}</Badge>
+              )}
+            </Button>
+          )}
           {onClose && (
             <Button variant="ghost" size="icon" onClick={onClose}>
               <X className="w-4 h-4" />
@@ -250,84 +322,103 @@ export function ChatInterface({ conversationId, projectId, onClose }: ChatInterf
       </div>
       
       <div className="flex flex-1 overflow-hidden">
-        {/* Messages */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <ScrollArea className="flex-1 p-4" ref={scrollRef}>
-            {messagesLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : messages.length === 0 && !streamingContent ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Sparkles className="w-8 h-8 text-primary" />
-                </div>
-                <h3 className="text-lg font-medium text-foreground mb-2">Start the conversation</h3>
-                <p className="text-sm text-muted-foreground max-w-md">
-                  Ask questions, get help with your project, or explore ideas. 
-                  Add context from tasks, decisions, or documents for more relevant responses.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {messages.map((message) => (
-                  <ChatMessage key={message.id} message={message} projectId={projectId} />
-                ))}
-                {streamingContent && (
-                  <ChatMessage 
-                    message={{ 
-                      id: 'streaming', 
-                      conversation_id: conversationId,
-                      role: 'assistant', 
-                      content: streamingContent,
-                      created_at: new Date().toISOString(),
-                    }} 
-                    isStreaming 
-                  />
-                )}
-              </div>
-            )}
-          </ScrollArea>
-          
-          {/* Input */}
-          <div className="p-4 border-t border-border bg-card">
-            <div className="flex gap-2">
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your message..."
-                className="min-h-[44px] max-h-[200px] resize-none"
-                disabled={isStreaming}
-              />
-              <Button 
-                onClick={handleSend} 
-                disabled={!input.trim() || isStreaming}
-                className="shrink-0"
-              >
-                {isStreaming ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+        {/* Show summary view for archived conversations that haven't loaded messages */}
+        {isArchived && !shouldLoadMessages ? (
+          renderArchivedSummaryView()
+        ) : (
+          <>
+            {/* Messages */}
+            <div className="flex-1 flex flex-col min-w-0">
+              <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+                {messagesLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : messages.length === 0 && !streamingContent ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                      <Sparkles className="w-8 h-8 text-primary" />
+                    </div>
+                    <h3 className="text-lg font-medium text-foreground mb-2">Start the conversation</h3>
+                    <p className="text-sm text-muted-foreground max-w-md">
+                      Ask questions, get help with your project, or explore ideas. 
+                      Add context from tasks, decisions, or documents for more relevant responses.
+                    </p>
+                  </div>
                 ) : (
-                  <Send className="w-4 h-4" />
+                  <div className="space-y-4">
+                    {messages.map((message) => (
+                      <ChatMessage key={message.id} message={message} projectId={projectId} />
+                    ))}
+                    {streamingContent && (
+                      <ChatMessage 
+                        message={{ 
+                          id: 'streaming', 
+                          conversation_id: conversationId,
+                          role: 'assistant', 
+                          content: streamingContent,
+                          created_at: new Date().toISOString(),
+                        }} 
+                        isStreaming 
+                      />
+                    )}
+                  </div>
                 )}
-              </Button>
+              </ScrollArea>
+              
+              {/* Input - disabled for archived conversations */}
+              {!isArchived && (
+                <div className="p-4 border-t border-border bg-card">
+                  <div className="flex gap-2">
+                    <Textarea
+                      ref={textareaRef}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Type your message..."
+                      className="min-h-[44px] max-h-[200px] resize-none"
+                      disabled={isStreaming}
+                    />
+                    <Button 
+                      onClick={handleSend} 
+                      disabled={!input.trim() || isStreaming}
+                      className="shrink-0"
+                    >
+                      {isStreaming ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        </div>
-        
-        {/* Context Panel */}
-        {showContext && (
-          <ContextPanel
-            tasks={tasks}
-            decisions={decisions}
-            documents={documents}
-            selectedContext={selectedContext}
-            onContextChange={setSelectedContext}
-            onClose={() => setShowContext(false)}
-          />
+            
+            {/* Context Panel */}
+            {showContext && !isArchived && (
+              <ContextPanel
+                tasks={tasks}
+                decisions={decisions}
+                documents={documents}
+                selectedContext={selectedContext}
+                onContextChange={setSelectedContext}
+                onClose={() => setShowContext(false)}
+              />
+            )}
+          </>
         )}
       </div>
+
+      {/* Summarize & Archive Modal */}
+      <SummarizeArchiveModal
+        open={archiveModalOpen}
+        onOpenChange={setArchiveModalOpen}
+        conversationTitle={conversation?.title || ''}
+        currentPurpose={conversation?.purpose}
+        onConfirm={handleArchiveConfirm}
+        isPending={archiveConversation.isPending}
+      />
     </div>
   );
 }

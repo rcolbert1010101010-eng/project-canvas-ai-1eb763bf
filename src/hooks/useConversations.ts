@@ -140,10 +140,27 @@ export function useArchiveConversation() {
   const { toast } = useToast();
   
   return useMutation({
-    mutationFn: async ({ id, summary }: { id: string; summary?: string }) => {
+    mutationFn: async ({ 
+      id, 
+      summary, 
+      purpose 
+    }: { 
+      id: string; 
+      summary: string; 
+      purpose?: string;
+    }) => {
+      const updateData: { is_archived: boolean; summary: string; purpose?: string } = {
+        is_archived: true,
+        summary,
+      };
+      
+      if (purpose) {
+        updateData.purpose = purpose;
+      }
+      
       const { data, error } = await supabase
         .from('conversations')
-        .update({ is_archived: true, summary })
+        .update(updateData)
         .eq('id', id)
         .select()
         .single();
@@ -153,7 +170,35 @@ export function useArchiveConversation() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['conversations', data.project_id] });
-      toast({ title: 'Conversation archived' });
+      queryClient.invalidateQueries({ queryKey: ['conversation', data.id] });
+      toast({ title: 'Conversation archived', description: 'Summary saved successfully' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+}
+
+export function useUnarchiveConversation() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { data, error } = await supabase
+        .from('conversations')
+        .update({ is_archived: false })
+        .eq('id', id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data as Conversation;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['conversations', data.project_id] });
+      queryClient.invalidateQueries({ queryKey: ['conversation', data.id] });
+      toast({ title: 'Conversation unarchived' });
     },
     onError: (error: Error) => {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
