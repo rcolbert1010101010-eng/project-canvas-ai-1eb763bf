@@ -13,7 +13,7 @@ BEGIN
   END IF;
 END $$;
 
--- Backfill existing data (safe for all convos, including those with zero messages)
+-- Backfill existing data (safe for all convos)
 UPDATE public.conversations c
 SET message_count = COALESCE(m.cnt, 0)
 FROM (
@@ -23,7 +23,7 @@ FROM (
 ) m
 WHERE c.id = m.conversation_id;
 
--- Ensure conversations with no messages are explicitly 0 (defensive)
+-- Defensive: ensure convos with no messages are 0
 UPDATE public.conversations
 SET message_count = 0
 WHERE message_count IS NULL;
@@ -61,3 +61,28 @@ DROP TRIGGER IF EXISTS trg_decrement_message_count ON public.messages;
 CREATE TRIGGER trg_decrement_message_count
 AFTER DELETE ON public.messages
 FOR EACH ROW EXECUTE FUNCTION public.decrement_conversation_message_count();
+
+-- Create trigger function for update (handles conversation_id changes)
+CREATE OR REPLACE FUNCTION public.adjust_conversation_message_count_on_update()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.conversation_id IS DISTINCT FROM OLD.conversation_id THEN
+    UPDATE public.conversations
+    SET message_count = GREATEST(message_count - 1, 0)
+    WHERE id = OLD.conversation_id;
+
+    UPDATE public.conversations
+    SET message_count = message_count + 1
+    WHERE id = NEW.conversation_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- Create trigger for update
+DROP TRIGGER IF EXISTS trg_adjust_message_count_on_update ON public.messages;
+CREATE TRIGGER trg_adjust_message_count_on_update
+AFTER UPDATE OF conversation_id ON public.messages
+FOR EACH ROW
+EXECUTE FUNCTION public.adjust_conversation_message_count_on_update();
